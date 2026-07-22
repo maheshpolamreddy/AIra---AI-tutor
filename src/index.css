@@ -1,0 +1,511 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 
+   GLOBAL THEME VARIABLES
+   Moved to root for global scope availability 
+*/
+:root {
+  /* Enhanced Visibility Theme: Lavender - Pink - Sky */
+  --theme-lavender: #E9D5FF;
+  /* Purple 200 */
+  --theme-pink: #FBCFE8;
+  /* Pink 200 */
+  --theme-sky: #BAE6FD;
+  /* Sky 200 */
+
+  /* Gradient stops - slightly more saturated for visibility */
+  --gradient-start: #E9D5FF;
+  --gradient-mid: #FBCFE8;
+  --gradient-end: #BAE6FD;
+
+  --color-primary: #8E78B0;
+  --color-accent: #C084FC;
+  --text-main: #374151;
+
+  --transition-smooth: 0.35s ease;
+  --transition-smooth-slow: 0.5s ease;
+
+  /* Global Layout */
+  --layout-page-px: 32px;
+  --layout-gap: 24px;
+
+  /* Teaching page: 3-column grid — 23% / 55% / 22%; content aligns with header Home (left) and Avatar (right) */
+  --teaching-panel-chat: 23%;
+  --teaching-panel-center: 55%;
+  --teaching-panel-studio: 22%;
+  --teaching-content-padding-x: 24px;
+  --teaching-content-margin-y: 24px;
+  --teaching-panels-gap: 24px;
+  --teaching-panel-radius: 20px;
+  --teaching-panel-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --teaching-panel-bg: #F5F4F8;
+  --teaching-panel-bg-alt: #F8F7FB;
+  --teaching-panel-divider: #E3E1EA;
+  --teaching-panel-text: #5F6370;
+  --teaching-panel-text-muted: #6B6F7A;
+  --teaching-accent: #8E7CC3;
+  --teaching-accent-hover: #9B8AD0;
+  --teaching-avatar-red: #D9534F;
+  /* 8pt spacing scale */
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+  /* Green board — matte blackboard style, chalk-white lines, chalk-yellow labels */
+  --teaching-board-bg: #0d2b1a;
+  --teaching-board-caption-bg: #0a1f12;
+  --teaching-board-width: 100%;
+  --teaching-board-radius: 18px;
+  --teaching-board-caption-height: 44px;
+  --teaching-board-min-height: 320px;
+  /* Chalk palette — used by all diagram SVGs */
+  --board-chalk-white: rgba(255, 255, 255, 0.90);
+  --board-chalk-yellow: #fef08a;
+  --board-chalk-green: #86efac;
+  --board-chalk-blue: #93c5fd;
+  --board-chalk-red: #fca5a5;
+  --board-chalk-dim: rgba(255, 255, 255, 0.35);
+  /* Page gradient: lavender-gray → pale violet-gray */
+  --teaching-page-gradient-start: #E6E1F0;
+  --teaching-page-gradient-end: #D9D2E8;
+  --teaching-header-bg: rgba(230, 225, 240, 0.85);
+
+  /* Font size base */
+  --font-size-base: 16px;
+
+  /* High contrast */
+  --high-contrast: 0;
+
+  /* Safe area insets for notched devices (phones, tablets) */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+/* Responsive spacing: slightly tighter on small screens */
+@media (max-width: 639px) {
+  :root {
+    --layout-page-px: 16px;
+    --space-lg: 20px;
+    --space-xl: 24px;
+    --teaching-panel-radius: 16px;
+    --teaching-board-inner-padding: 16px;
+  }
+}
+
+@media (max-width: 374px) {
+  :root {
+    --layout-page-px: 12px;
+    --space-lg: 16px;
+    --space-xl: 20px;
+  }
+}
+
+/* Safe area utility classes */
+.safe-top {
+  padding-top: var(--safe-top);
+}
+
+.safe-bottom {
+  padding-bottom: var(--safe-bottom);
+}
+
+.safe-left {
+  padding-left: var(--safe-left);
+}
+
+.safe-right {
+  padding-right: var(--safe-right);
+}
+
+.safe-x {
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+.safe-y {
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+
+/* Inset for fixed/sticky bars so content doesn't sit under notch */
+.padding-safe-top {
+  padding-top: max(var(--space-md), var(--safe-top));
+}
+
+.padding-safe-bottom {
+  padding-bottom: max(var(--space-md), var(--safe-bottom));
+}
+
+/* Green board: fills width, smooth rounded corners, deep forest green */
+/* Universal Visual-Synced: 32px inner padding, 300ms fade, 16:9 safe area */
+:root {
+  --teaching-board-inner-padding: 12px;
+  --teaching-board-fade-duration-ms: 300;
+  --teaching-board-safe-aspect: 16 / 9;
+}
+
+.teaching-board {
+  width: var(--teaching-board-width);
+  max-width: 100%;
+  min-height: var(--teaching-board-min-height);
+  background-color: var(--teaching-board-bg);
+  border-radius: var(--teaching-board-radius);
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+/* Base Constraints */
+@layer base {
+  .dark {
+    --gradient-start: #0f172a;
+    --gradient-mid: #1e1b4b;
+    --gradient-end: #312e81;
+    --color-primary: #c084fc;
+    --text-main: #f8fafc;
+    /* Teaching Page Dark Mode Variables */
+    --teaching-page-gradient-start: #0f172a;
+    --teaching-page-gradient-end: #1e1b4b;
+    --teaching-panel-bg: rgba(30, 41, 59, 0.95);
+    --teaching-panel-bg-alt: #0f172a;
+    --teaching-panel-divider: #334155;
+    --teaching-panel-text: #f8fafc;
+    --teaching-panel-text-muted: #94a3b8;
+    --teaching-header-bg: rgba(15, 23, 42, 0.85);
+    color-scheme: dark;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    @apply h-full antialiased scroll-smooth;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    color-scheme: light;
+  }
+
+  html[data-font-size="small"] {
+    font-size: 14px;
+  }
+
+  html[data-font-size="medium"] {
+    font-size: 16px;
+  }
+
+  html[data-font-size="large"] {
+    font-size: 18px;
+  }
+
+  html[data-font-size="xlarge"] {
+    font-size: 20px;
+  }
+
+  html[data-reduce-animations="true"] *,
+  html[data-reduce-animations="true"] *::before,
+  html[data-reduce-animations="true"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  body {
+    @apply font-sans text-slate-800 dark:text-slate-100 dark:bg-slate-950 w-full overflow-x-hidden transition-colors duration-500;
+    
+    /* Global Premium Educational Background */
+    background: linear-gradient(135deg, #F7F9FC 0%, #EEF3F9 50%, #E6F0FF 100%);
+    background-attachment: fixed;
+    
+    min-height: 100vh;
+    min-height: 100dvh;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+    /* Prevent bounce at the top/bottom on mobile natively */
+  }
+
+  /* Reset gradient for strictly dark mode so it doesn't blind users */
+  .dark body {
+    background: #0f172a; /* Fallback to slate-950 equivalent for dark mode */
+  }
+
+  #root {
+    min-height: 100vh;
+    min-height: 100dvh;
+    @apply w-full relative;
+  }
+
+  /* Smooth light/dark transitions for core UI elements */
+  body,
+  button,
+  input,
+  select,
+  textarea,
+  a,
+  header,
+  main,
+  section,
+  article,
+  aside,
+  footer {
+    transition:
+      background-color var(--transition-smooth),
+      color var(--transition-smooth),
+      border-color var(--transition-smooth),
+      fill var(--transition-smooth),
+      stroke var(--transition-smooth),
+      box-shadow var(--transition-smooth);
+  }
+
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Accessibility & overrides */
+  html[data-high-contrast="true"] {
+    --high-contrast: 1;
+    filter: contrast(1.2) brightness(1.1);
+  }
+}
+
+/* LAYER: UTILITIES */
+@layer utilities {
+
+  /* Glass Morphism - Refined */
+  .glass {
+    background: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 8px 32px rgba(31, 38, 135, 0.1);
+  }
+
+  .dark .glass {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .dark .glass-card {
+    background: rgba(30, 41, 59, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  /* GPU Hardware Acceleration Utilities */
+  .hw-accelerate {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    will-change: transform, opacity;
+  }
+
+  .smooth-transform {
+    transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1),
+      opacity 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+  }
+
+  /* Smart Backdrop Blur - Disables expensive blur on mobile devices to save FPS */
+  @media (max-width: 639px) {
+
+    .glass,
+    .glass-card {
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      background: rgba(255, 255, 255, 0.95);
+      /* Provide a solid fallback so content remains readable */
+    }
+
+    .dark .glass,
+    .dark .glass-card {
+      background: rgba(15, 23, 42, 0.95);
+    }
+  }
+
+  /* Text Gradients */
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary-600 via-accent-500 to-primary-600;
+  }
+
+  /* Buttons */
+  .btn-primary {
+    @apply bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] active:scale-[0.98];
+  }
+
+  .btn-secondary {
+    @apply glass-card text-slate-700 font-semibold py-3 px-6 rounded-xl hover:bg-white hover:shadow-lg transition-all duration-300;
+  }
+
+  .card {
+    @apply glass-card rounded-2xl p-6 transition-all duration-300 hover:shadow-xl hover:-translate-y-1;
+  }
+
+  .card-interactive {
+    @apply card cursor-pointer active:scale-[0.99];
+  }
+
+  /* Animations */
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+    will-change: transform;
+  }
+
+  .animate-pulse-slow {
+    animation: pulse 4s ease-in-out infinite;
+    will-change: opacity;
+  }
+
+  /* Responsive Text */
+  .text-responsive-base {
+    @apply text-base sm:text-lg;
+  }
+
+  .text-responsive-lg {
+    @apply text-lg sm:text-xl md:text-2xl;
+  }
+
+  .text-responsive-xl {
+    @apply text-xl sm:text-2xl md:text-3xl;
+  }
+
+  .container-responsive {
+    @apply w-full px-4 sm:px-6 md:px-8 lg:px-12 mx-auto;
+  }
+
+  /* Optimized Scroll Containers */
+  .scroll-optimized {
+    @apply overflow-y-auto overscroll-y-none scroll-smooth transform-gpu;
+    -webkit-overflow-scrolling: touch;
+    will-change: scroll-position;
+    /* Optional: hide scrollbar completely on mobile if desired, or let custom scrollbar handle it */
+  }
+
+  /* Custom Sleek Scrollbar - Aira Premium */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+ 
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 10px;
+  }
+ 
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: linear-gradient(to bottom, #8E7CC3, #C084FC);
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+ 
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(to bottom, #9B8AD0, #D1A3FF);
+    border: 1px solid transparent;
+    background-clip: content-box;
+  }
+
+  /* Liquid Shine Utility for Progress Bars */
+  .liquid-shine {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .liquid-shine::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.3) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    animation: liquid-shine-move 3s infinite linear;
+  }
+
+  @keyframes liquid-shine-move {
+    0% { left: -100%; }
+    100% { left: 200%; }
+  }
+}
+
+/* Keyframes (Global) */
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* Helper Classes */
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+  .animate-pulse-slow {
+    animation: pulse 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  /* Voice Bar Animations */
+  @keyframes voice-bar {
+    0%, 100% { transform: scaleY(1); }
+    50% { transform: scaleY(2.5); }
+  }
+
+  .animate-voice-bar-1 { animation: voice-bar 0.6s infinite ease-in-out; }
+  .animate-voice-bar-2 { animation: voice-bar 0.6s infinite ease-in-out 0.12s; }
+  .animate-voice-bar-3 { animation: voice-bar 0.6s infinite ease-in-out 0.24s; }
+
+/* 
+  VISUAL FREEZE GUARANTEE
+  Strictly pauses all animations and transitions when active.
+  Used by TeachingPage during pause/doubt modes.
+*/
+body.visual-freeze-active *,
+body.visual-freeze-active *::before,
+body.visual-freeze-active *::after {
+  animation-play-state: paused !important;
+  transition: none !important;
+}

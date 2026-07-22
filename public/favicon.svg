@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <title>Ajra</title>
+  <defs>
+    <linearGradient id="aira-fg" x1="6" y1="4" x2="26" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4f46e5"/>
+      <stop offset="0.45" stop-color="#9333ea"/>
+      <stop offset="1" stop-color="#ec4899"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#aira-fg)"/>
+  <!-- 4-point star -->
+  <path fill="#ffffff" fill-opacity="0.95" d="M16 8.5 17.75 13.25 22.5 15 17.75 16.75 16 21.5 14.25 16.75 9.5 15 14.25 13.25z"/>
+  <circle cx="16" cy="15" r="2" fill="#4c1d95"/>
+</svg>
