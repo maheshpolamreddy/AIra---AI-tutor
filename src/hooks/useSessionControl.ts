@@ -224,6 +224,14 @@ export function useSessionControl(topicId: string | undefined) {
                 language: targetLanguage,
             };
 
+            // A concurrent init (e.g. StrictMode double-effect) may have already started this
+            // session while we awaited content. Starting it again would reset pause/doubt state
+            // mid-lesson, so the slower duplicate must be a no-op.
+            const sessionAlreadyActive = () => {
+                const live = useTeachingStore.getState().currentSession;
+                return live?.topicId === topicId && live?.language === targetLanguage;
+            };
+
             // Preload and Start
             if (registryEntry) {
                 setIsPreloading(true);
@@ -232,9 +240,9 @@ export function useSessionControl(topicId: string | undefined) {
                     await preloadService.preloadPriorityVisuals(registryEntry, 1);
                 } finally {
                     setIsPreloading(false);
-                    startSession(finalSession);
+                    if (!sessionAlreadyActive()) startSession(finalSession);
                 }
-            } else {
+            } else if (!sessionAlreadyActive()) {
                 startSession(finalSession);
             }
         };

@@ -21,11 +21,40 @@ import { useSessionControl } from '../hooks/useSessionControl';
 import type { ChatMessage, Topic } from '../types';
 
 type StudioTabId = 'notes' | 'map' | 'flashcards' | 'quiz' | 'summary' | 'analyzer';
+
+/** Human-readable names for supported teacher languages (drives the doubt-mode AI reply language). */
+const DOUBT_LANGUAGE_NAMES: Record<string, string> = {
+    'en-IN': 'English', 'hi-IN': 'Hindi', 'te-IN': 'Telugu', 'ta-IN': 'Tamil',
+    'kn-IN': 'Kannada', 'ml-IN': 'Malayalam', 'bn-IN': 'Bengali', 'mr-IN': 'Marathi',
+    'gu-IN': 'Gujarati', 'pa-IN': 'Punjabi', 'od-IN': 'Odia',
+};
+
+/** Minimal typing for the Web Speech API recognition object (not in all TS lib versions). */
+interface SpeechRecognitionLike {
+    lang: string;
+    continuous: boolean;
+    interimResults: boolean;
+    onresult: ((event: { resultIndex: number; results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }> }) => void) | null;
+    onend: (() => void) | null;
+    onerror: (() => void) | null;
+    start: () => void;
+    stop: () => void;
+}
+
+function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
+    if (typeof window === 'undefined') return null;
+    const w = window as unknown as {
+        SpeechRecognition?: new () => SpeechRecognitionLike;
+        webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
 import {
     ChevronLeft, ChevronRight, Square, Maximize2, Minimize2, Settings, HelpCircle,
     FileText, CreditCard, Sparkles, Loader2, MessageCircle, Layers,
-    Map as LucideMap, ArrowUp, Volume2, VolumeX, Home, Scan
+    Map as LucideMap, ArrowUp, Volume2, VolumeX, Home, Scan, Mic, PlayCircle, GraduationCap
 } from 'lucide-react';
+import { speakDoubtText, stopDoubtSpeech } from '../utils/doubtSpeech';
 const QuizViewer = lazy(() => import('../components/studio/QuizViewer'));
 import { toast } from '../stores/toastStore';
 import { studentRoutes } from '../utils/routes';
@@ -55,6 +84,9 @@ export default function TeachingPage() {
         pause,
         resume,
         isInDoubtMode,
+        enterDoubtMode,
+        exitDoubtMode,
+        resolveDoubt,
     } = useTeachingStore(useShallow(state => ({
         currentSession: state.currentSession,
         currentStep: state.currentStep,
@@ -62,7 +94,10 @@ export default function TeachingPage() {
         isSpeaking: state.isSpeaking,
         pause: state.pause,
         resume: state.resume,
-        isInDoubtMode: state.isInDoubtMode
+        isInDoubtMode: state.isInDoubtMode,
+        enterDoubtMode: state.enterDoubtMode,
+        exitDoubtMode: state.exitDoubtMode,
+        resolveDoubt: state.resolveDoubt,
     })));
     const { user, role } = useAuthStore(useShallow(state => ({ user: state.user, role: state.role })));
 
@@ -176,6 +211,243 @@ export default function TeachingPage() {
     const attachmentStillLoading = uploadedChatFiles.some(f => !f.dataUrl);
     const { topicUnavailable, isPreloading } = useSessionControl(topicId);
     const { isMuted, setIsMuted, isFetchingAudio } = useSpeech(currentStepData, playbackTrigger);
+
+    // ── "Raise a Doubt" interactive teacher (chat panel) ─────────────────────
+    const [doubtSpeaking, setDoubtSpeaking] = useState(false);
+    const [isListening, setIsListening] = useState(false);
+    /** Hands-free voice conversation with the AI teacher (auto listen → auto send → spoken reply → listen again). */
+    const [isTeacherMode, setIsTeacherMode] = useState(false);
+    /** Ref mirror of isTeacherMode so async speech/recognition callbacks read the live value. */
+    const teacherModeRef = useRef(false);
+    const doubtSpeechSeqRef = useRef(0);
+    /** How many teacher answers were given for the current doubt session (drives adaptive re-explanation). */
+    const doubtAnswerCountRef = useRef(0);
+    const activeDoubtIdRef = useRef<string | null>(null);
+    const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+    /** Latest transcript captured during the current listening turn (auto-sent when the student stops speaking). */
+    const latestTranscriptRef = useRef('');
+    /** Consecutive listening turns that ended with silence — stop auto-relistening after a couple. */
+    const emptyListenCountRef = useRef(0);
+    const chatInputRef = useRef<HTMLInputElement>(null);
+    /**
+     * Latest-closure dispatchers for the voice loop. Recognition callbacks and TTS
+     * .then() chains outlive the render they were created in; calling the captured
+     * functions directly would freeze state (e.g. isInDoubtMode, chat history) at
+     * that old render and break turn-taking. These refs are reassigned every render.
+     */
+    const startListeningRef = useRef<() => void>(() => { /* assigned each render */ });
+    const sendMessageRef = useRef<(text: string) => void>(() => { /* assigned each render */ });
+
+    const doubtTtsLanguage = settings?.accessibility?.ttsLanguage || 'en-IN';
+    const doubtTtsSpeaker = settings?.accessibility?.ttsSpeaker || 'anushka';
+    const doubtTtsSpeed = settings?.accessibility?.ttsSpeed ?? 1;
+    const doubtTtsVoiceName = settings?.accessibility?.ttsVoice || '';
+    const doubtLanguageName = DOUBT_LANGUAGE_NAMES[doubtTtsLanguage] || 'English';
+
+    /** Speak a doubt-teacher message aloud (skipped while muted). Resolves when playback ends. */
+    const speakForDoubt = async (text: string) => {
+        if (isMuted) return;
+        const seq = ++doubtSpeechSeqRef.current;
+        setDoubtSpeaking(true);
+        try {
+            await speakDoubtText(text, {
+                language: doubtTtsLanguage,
+                speaker: doubtTtsSpeaker,
+                speed: doubtTtsSpeed,
+                voiceName: doubtTtsVoiceName,
+            });
+        } finally {
+            if (seq === doubtSpeechSeqRef.current && isMountedRef.current) setDoubtSpeaking(false);
+        }
+    };
+
+    const stopListening = () => {
+        latestTranscriptRef.current = '';
+        try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+        recognitionRef.current = null;
+        setIsListening(false);
+    };
+
+    /**
+     * Start one listening turn. In teacher mode this powers automatic turn-taking:
+     * the recognizer ends itself when the student pauses, the transcript auto-sends,
+     * and the mic re-opens after the teacher finishes the spoken reply.
+     */
+    const startListening = () => {
+        const Ctor = getSpeechRecognitionCtor();
+        if (!Ctor) {
+            toast.info('Voice input is not supported in this browser — you can type your doubt instead.');
+            return;
+        }
+        if (recognitionRef.current) return; // already listening
+        stopDoubtSpeech(); // never transcribe the teacher's own voice
+        setDoubtSpeaking(false);
+        latestTranscriptRef.current = '';
+        try {
+            const rec = new Ctor();
+            rec.lang = doubtTtsLanguage;
+            rec.continuous = false;
+            rec.interimResults = true;
+            rec.onresult = (event) => {
+                let transcript = '';
+                for (let i = 0; i < event.results.length; i++) {
+                    transcript += event.results[i][0]?.transcript ?? '';
+                }
+                transcript = transcript.trim();
+                if (transcript) {
+                    latestTranscriptRef.current = transcript;
+                    setInputMessage(transcript);
+                }
+            };
+            rec.onend = () => {
+                recognitionRef.current = null;
+                if (!isMountedRef.current) return;
+                setIsListening(false);
+                const text = latestTranscriptRef.current.trim();
+                latestTranscriptRef.current = '';
+                // Hands-free turn-taking: silence ends the student's turn and sends the doubt
+                if (teacherModeRef.current && useTeachingStore.getState().isInDoubtMode) {
+                    if (text) {
+                        emptyListenCountRef.current = 0;
+                        sendMessageRef.current(text);
+                    } else {
+                        emptyListenCountRef.current += 1;
+                        if (emptyListenCountRef.current <= 2) {
+                            startListeningRef.current();
+                        } else {
+                            emptyListenCountRef.current = 0;
+                            setChatMessages(prev => [...prev, {
+                                id: `doubt-quiet-${Date.now()}`,
+                                type: 'system',
+                                content: "I couldn't hear you. Tap the mic when you're ready to speak, or type your doubt.",
+                                timestamp: new Date().toISOString(),
+                            }]);
+                        }
+                    }
+                }
+            };
+            rec.onerror = () => {
+                recognitionRef.current = null;
+                if (isMountedRef.current) setIsListening(false);
+            };
+            recognitionRef.current = rec;
+            rec.start();
+            setIsListening(true);
+        } catch {
+            recognitionRef.current = null;
+            setIsListening(false);
+        }
+    };
+
+    /**
+     * Raise a Doubt: pause the lesson at its exact position and open the chat panel.
+     * Quiet by design — the teacher only starts speaking when the student activates
+     * the Interactive AI Teacher button (or simply types a question).
+     */
+    const handleRaiseDoubt = (opts?: { silent?: boolean }) => {
+        if (isInDoubtMode || !currentSession) return;
+        unlockAudioContext();
+
+        const doubtId = `doubt_${Date.now()}`;
+        activeDoubtIdRef.current = doubtId;
+        doubtAnswerCountRef.current = 0;
+        enterDoubtMode({
+            id: doubtId,
+            sessionId: currentSession.id,
+            question: '',
+            timestamp: new Date().toISOString(),
+            context: {
+                stepNumber: currentStep,
+                stepTitle: currentStepData?.title || '',
+            },
+            status: 'pending',
+        });
+
+        // Open the chat panel (same teacher turns to the student — no page change)
+        if (isMobile) {
+            setMobilePanel('home');
+        } else {
+            setCenterMaximized(false);
+            setRightMaximized(false);
+            setCenterPanelVisible(true);
+        }
+        const focusTimeout = setTimeout(() => chatInputRef.current?.focus(), 400);
+        timeoutRefs.current.push(focusTimeout);
+
+        if (!opts?.silent) {
+            setChatMessages(prev => [...prev, {
+                id: `doubt-open-${Date.now()}`,
+                type: 'system',
+                content: 'Lesson paused. Tap the teacher button to talk with Aɪra hands-free, or type your doubt below.',
+                timestamp: new Date().toISOString(),
+            }]);
+        }
+    };
+
+    /** Activate the hands-free voice-to-voice teacher: greet, then listen automatically. */
+    const activateTeacherMode = () => {
+        if (!currentSession) return;
+        unlockAudioContext();
+        if (!isInDoubtMode) handleRaiseDoubt({ silent: true }); // voice teacher implies the lesson pauses first
+        teacherModeRef.current = true;
+        setIsTeacherMode(true);
+        emptyListenCountRef.current = 0;
+
+        const greeting = "Hi! I'm here to help. What's your doubt? Just ask me in your own words, and I'll explain it step by step.";
+        setChatMessages(prev => [...prev, {
+            id: `teacher-greet-${Date.now()}`,
+            type: 'ai',
+            content: greeting,
+            timestamp: new Date().toISOString(),
+        }]);
+        void speakForDoubt(greeting).then(() => {
+            if (teacherModeRef.current && useTeachingStore.getState().isInDoubtMode && isMountedRef.current) {
+                startListeningRef.current();
+            }
+        });
+    };
+
+    /** Turn off the hands-free conversation (doubt mode itself stays open for typing). */
+    const deactivateTeacherMode = () => {
+        teacherModeRef.current = false;
+        setIsTeacherMode(false);
+        stopListening();
+        stopDoubtSpeech();
+        setDoubtSpeaking(false);
+    };
+
+    /** Resume Lesson: close doubt mode and continue playback from the exact paused sentence. */
+    const handleResumeLesson = () => {
+        teacherModeRef.current = false;
+        setIsTeacherMode(false);
+        stopDoubtSpeech();
+        stopListening();
+        setDoubtSpeaking(false);
+        if (activeDoubtIdRef.current) {
+            resolveDoubt(activeDoubtIdRef.current);
+            activeDoubtIdRef.current = null;
+        }
+        exitDoubtMode();
+        setChatMessages(prev => [...prev, {
+            id: `doubt-resume-${Date.now()}`,
+            type: 'system',
+            content: 'Doubt resolved — resuming the lesson right where we left off.',
+            timestamp: new Date().toISOString(),
+        }]);
+        if (isMobile) setMobilePanel('teach');
+        unlockAudioContext();
+        resume();
+    };
+
+    // Safety net: stop doubt speech / mic when leaving the page
+    useEffect(() => {
+        return () => {
+            teacherModeRef.current = false;
+            stopDoubtSpeech();
+            try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+            useTeachingStore.getState().exitDoubtMode();
+        };
+    }, []);
 
     useEffect(() => {
         const handleFallbackNotice = (e: Event) => {
@@ -308,8 +580,12 @@ export default function TeachingPage() {
 
 
 
-    const handleSendMessage = async () => {
-        if (!inputMessage.trim() && uploadedChatFiles.length === 0) return;
+    const handleSendMessage = async (overrideText?: string) => {
+        const outgoingText = (overrideText ?? inputMessage).trim();
+        if (!outgoingText && uploadedChatFiles.length === 0) return;
+        // Read live from the store: this function is also invoked from speech-recognition
+        // callbacks, and doubt mode may have been entered after those closures were created.
+        const inDoubtMode = useTeachingStore.getState().isInDoubtMode;
         if (uploadedChatFiles.some(f => !f.dataUrl)) {
             toast.info('Please wait for your file or image to finish loading.');
             return;
@@ -321,8 +597,15 @@ export default function TeachingPage() {
         timeoutRefs.current.push(actionTimeoutId);
         setLastUserAction('message-sent');
 
+        // A new question interrupts the teacher's voice and the mic
+        stopListening();
+        if (doubtSpeaking) {
+            stopDoubtSpeech();
+            setDoubtSpeaking(false);
+        }
+
         // Build message content with file info
-        let messageContent = inputMessage.trim();
+        let messageContent = outgoingText;
         if (uploadedChatFiles.length > 0) {
             const fileNames = uploadedChatFiles.map(f => f.name).join(', ');
             messageContent = messageContent
@@ -337,7 +620,7 @@ export default function TeachingPage() {
             timestamp: new Date().toISOString(),
         };
 
-        const sentMessage = inputMessage.trim();
+        const sentMessage = outgoingText;
         const sentFiles = uploadedChatFiles;
         setChatMessages(prev => [...prev, userMessage]);
         setInputMessage('');
@@ -377,6 +660,22 @@ export default function TeachingPage() {
                         }
                     }
                 }
+            } else if (inDoubtMode) {
+                // ── DOUBT MODE: Aɪra teacher persona, spoken aloud, adaptive ────
+                doubtAnswerCountRef.current += 1;
+                aiText = await aiService.answerDoubt({
+                    question: sentMessage,
+                    topicName: currentSession?.topicName ?? null,
+                    chapterName: topicInfo.chapterName ?? null,
+                    stepTitle: currentStepData?.title ?? null,
+                    stepContent: currentStepData?.content ?? '',
+                    subjectArea: topicInfo.subjectArea,
+                    gradeLevel: topicInfo.gradeLevel,
+                    conversationHistory: historySnapshot,
+                    userProfession: profile?.profession?.name ?? null,
+                    attemptNumber: doubtAnswerCountRef.current,
+                    preferredLanguageName: doubtLanguageName,
+                });
             } else {
                 // ── REGULAR CHAT PATH (no files) ─────────────────────────────────
                 aiText = await aiService.sendChatMessage({
@@ -401,20 +700,43 @@ export default function TeachingPage() {
                 timestamp: new Date().toISOString(),
             };
             setChatMessages(prev => [...prev, aiResponse]);
+
+            // In doubt mode the teacher speaks every answer aloud; in hands-free
+            // teacher mode the mic re-opens once the reply finishes (turn-taking).
+            if (inDoubtMode) {
+                void speakForDoubt(aiText).then(() => {
+                    if (teacherModeRef.current && useTeachingStore.getState().isInDoubtMode && isMountedRef.current) {
+                        startListeningRef.current();
+                    }
+                });
+            }
         } catch (err) {
             if (!isMountedRef.current) return;
             console.warn('[TeachingPage] Chat request failed:', err);
+            const fallbackText = `Sorry, I had trouble connecting to the AI service. Please try again in a moment!`;
             const fallbackResponse: ChatMessage = {
                 id: (Date.now() + 1).toString(),
                 type: 'ai',
-                content: `Sorry, I had trouble connecting to the AI service. Please try again in a moment!`,
+                content: fallbackText,
                 timestamp: new Date().toISOString(),
             };
             setChatMessages(prev => [...prev, fallbackResponse]);
+            // Keep the hands-free conversation alive across a network hiccup
+            if (inDoubtMode) {
+                void speakForDoubt(fallbackText).then(() => {
+                    if (teacherModeRef.current && useTeachingStore.getState().isInDoubtMode && isMountedRef.current) {
+                        startListeningRef.current();
+                    }
+                });
+            }
         } finally {
             if (isMountedRef.current) setIsChatLoading(false);
         }
     };
+
+    // Re-point the voice-loop dispatchers at this render's closures (fresh state every render)
+    startListeningRef.current = startListening;
+    sendMessageRef.current = (text: string) => { void handleSendMessage(text); };
 
     // Cleanup all timeouts on unmount
     useEffect(() => {
@@ -699,8 +1021,12 @@ export default function TeachingPage() {
                             onClick={() => {
                                 if (isMuted) {
                                     unlockAudioContext();
-                                } else if (typeof window !== 'undefined' && window.speechSynthesis) {
-                                    window.speechSynthesis.cancel();
+                                } else {
+                                    if (typeof window !== 'undefined' && window.speechSynthesis) {
+                                        window.speechSynthesis.cancel();
+                                    }
+                                    stopDoubtSpeech();
+                                    setDoubtSpeaking(false);
                                 }
                                 setIsMuted((m) => !m);
                             }}
@@ -814,26 +1140,90 @@ export default function TeachingPage() {
                             <h2 className="text-base sm:text-lg font-medium text-[var(--teaching-panel-text)] truncate px-2" style={{ letterSpacing: '0.01em' }}>Chat Panel</h2>
                         </div>
 
+                        {/* Doubt Mode banner — lesson paused, teacher is listening */}
+                        <AnimatePresence>
+                            {isInDoubtMode && (
+                                <motion.div
+                                    initial={reduceAnimations ? false : { opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: 'auto' }}
+                                    exit={reduceAnimations ? undefined : { opacity: 0, height: 0 }}
+                                    transition={{ duration: reduceAnimations ? 0 : 0.35, ease: 'easeInOut' }}
+                                    className="shrink-0 overflow-hidden border-b"
+                                    style={{ borderColor: 'var(--teaching-panel-divider)' }}
+                                >
+                                    <div className="flex items-center justify-between gap-2 px-3 py-2 bg-purple-50 dark:bg-purple-900/30">
+                                        <span className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 dark:text-purple-300 min-w-0">
+                                            {doubtSpeaking ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { stopDoubtSpeech(); setDoubtSpeaking(false); }}
+                                                    className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
+                                                    title="Stop the teacher's voice"
+                                                    aria-label="Stop speaking"
+                                                >
+                                                    <Volume2 className="w-4 h-4 shrink-0 animate-pulse text-purple-600 dark:text-purple-300" />
+                                                    <span className="truncate">Aɪra is speaking...</span>
+                                                </button>
+                                            ) : isListening ? (
+                                                <>
+                                                    <Mic className="w-4 h-4 shrink-0 animate-pulse text-red-500" />
+                                                    <span className="truncate">Listening — just speak, no need to press send</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <HelpCircle className="w-4 h-4 shrink-0" />
+                                                    <span className="truncate">{isTeacherMode ? 'Teacher Mode — hands-free conversation' : 'Doubt Mode — lesson paused'}</span>
+                                                </>
+                                            )}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={handleResumeLesson}
+                                            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold transition-all active:scale-95 shadow-sm"
+                                            aria-label="Resume Lesson"
+                                        >
+                                            <PlayCircle className="w-3.5 h-3.5 shrink-0" />
+                                            Resume Lesson
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
                         {/* Chat Messages — scrollable, responsive padding */}
                         <div
                             className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 sm:space-y-4 min-h-0"
                             style={{ padding: 'clamp(12px, 3vw, var(--space-lg))' }}
                         >
                             {chatMessages.map((msg) => (
-                                <motion.div
-                                    key={msg.id}
-                                    initial={reduceAnimations ? false : { opacity: 0, y: 8 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ duration: reduceAnimations ? 0 : 0.25, ease: 'easeOut' }}
-                                    className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
-                                >
-                                    <div className={`max-w-[90%] px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm break-words ${msg.type === 'user'
-                                        ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-2xl rounded-br-md shadow-sm'
-                                        : 'bg-white dark:bg-slate-800 shadow-sm border border-gray-100 dark:border-slate-700 rounded-2xl rounded-bl-md text-gray-700 dark:text-gray-100'
-                                        }`}>
-                                        {msg.content}
-                                    </div>
-                                </motion.div>
+                                msg.type === 'system' ? (
+                                    <motion.div
+                                        key={msg.id}
+                                        initial={reduceAnimations ? false : { opacity: 0 }}
+                                        animate={{ opacity: 1 }}
+                                        transition={{ duration: reduceAnimations ? 0 : 0.25 }}
+                                        className="flex justify-center"
+                                    >
+                                        <span className="text-[11px] sm:text-xs text-gray-400 dark:text-slate-500 italic text-center px-3">
+                                            {msg.content}
+                                        </span>
+                                    </motion.div>
+                                ) : (
+                                    <motion.div
+                                        key={msg.id}
+                                        initial={reduceAnimations ? false : { opacity: 0, y: 8 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: reduceAnimations ? 0 : 0.25, ease: 'easeOut' }}
+                                        className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                                    >
+                                        <div className={`max-w-[90%] px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm break-words ${msg.type === 'user'
+                                            ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-2xl rounded-br-md shadow-sm'
+                                            : 'bg-white dark:bg-slate-800 shadow-sm border border-gray-100 dark:border-slate-700 rounded-2xl rounded-bl-md text-gray-700 dark:text-gray-100'
+                                            }`}>
+                                            {msg.content}
+                                        </div>
+                                    </motion.div>
+                                )
                             ))}
                             {/* AI Thinking indicator */}
                             {isChatLoading && (
@@ -972,13 +1362,28 @@ export default function TeachingPage() {
                                         <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41A2 2 0 0 1 6.59 14.59L15.78 5.4" />
                                     </svg>
                                 </button>
+                                {/* Voice input (mic) */}
+                                <button
+                                    type="button"
+                                    onClick={() => (isListening ? stopListening() : startListening())}
+                                    disabled={isChatLoading}
+                                    className={`shrink-0 flex items-center justify-center rounded-full w-8 h-8 transition-all disabled:opacity-40 ${isListening
+                                        ? 'text-red-500 bg-red-50 dark:bg-red-900/30 animate-pulse'
+                                        : 'text-gray-400 hover:text-purple-500 hover:bg-purple-50'
+                                        }`}
+                                    title={isListening ? 'Stop voice input' : 'Speak your question'}
+                                    aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+                                >
+                                    <Mic className="w-4 h-4" />
+                                </button>
                                 {/* Text input */}
                                 <input
+                                    ref={chatInputRef}
                                     type="text"
                                     value={inputMessage}
                                     onChange={(e) => setInputMessage(e.target.value)}
                                     onKeyDown={(e) => e.key === 'Enter' && !isChatLoading && !attachmentStillLoading && handleSendMessage()}
-                                    placeholder={isChatLoading ? 'AI is thinking...' : 'Ask anything or attach a file...'}
+                                    placeholder={isListening ? 'Listening... speak your doubt' : isChatLoading ? 'AI is thinking...' : isInDoubtMode ? 'Ask your doubt — speak or type...' : 'Ask anything or attach a file...'}
                                     disabled={isChatLoading}
                                     className="flex-1 min-w-0 bg-transparent border-none outline-none focus:ring-0 text-sm placeholder:text-gray-400 dark:placeholder:text-slate-500 py-2 disabled:cursor-wait"
                                     style={{ color: 'var(--teaching-panel-text)' }}
@@ -986,7 +1391,7 @@ export default function TeachingPage() {
                                 {/* Send button */}
                                 <button
                                     type="button"
-                                    onClick={handleSendMessage}
+                                    onClick={() => handleSendMessage()}
                                     disabled={isChatLoading || attachmentStillLoading || (!inputMessage.trim() && uploadedChatFiles.length === 0)}
                                     className="shrink-0 flex items-center justify-center rounded-full transition-all active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
                                     style={{
@@ -1000,6 +1405,24 @@ export default function TeachingPage() {
                                         ? <Loader2 className="w-4 h-4 text-white animate-spin" />
                                         : <ArrowUp className="w-4 h-4 text-white" />
                                     }
+                                </button>
+                                {/* Interactive AI Teacher — hands-free voice conversation */}
+                                <button
+                                    type="button"
+                                    onClick={() => (isTeacherMode ? deactivateTeacherMode() : activateTeacherMode())}
+                                    disabled={!currentSession}
+                                    className={`shrink-0 flex items-center justify-center rounded-full transition-all active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed ${isTeacherMode ? 'ring-2 ring-purple-300' : 'hover:opacity-90'}`}
+                                    style={{
+                                        width: 36,
+                                        height: 36,
+                                        background: 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)',
+                                        boxShadow: isTeacherMode ? '0 0 14px rgba(124, 58, 237, 0.65)' : 'none',
+                                    }}
+                                    title={isTeacherMode ? 'Stop Interactive AI Teacher' : 'Interactive AI Teacher'}
+                                    aria-label={isTeacherMode ? 'Stop Interactive AI Teacher' : 'Start Interactive AI Teacher'}
+                                    aria-pressed={isTeacherMode}
+                                >
+                                    <GraduationCap className={`w-4 h-4 text-white ${isTeacherMode ? 'animate-pulse' : ''}`} />
                                 </button>
                             </div>
                         </div>
@@ -1119,33 +1542,17 @@ export default function TeachingPage() {
                                             <div className="flex items-center gap-2">
                                                 <button
                                                     type="button"
-                                                    onClick={() => {
-                                                        // Priority: Pause speech
-                                                        if (isLivePlayback) {
-                                                            pause();
-                                                        }
-                                                        // Navigation: Open Chat panel based on device view
-                                                        if (isMobile) {
-                                                            setMobilePanel('home');
-                                                        } else {
-                                                            // For desktop, ensure the right/center panels are adjusted to show Chat
-                                                            setCenterMaximized(false);
-                                                            setRightMaximized(false);
-                                                            setCenterPanelVisible(true);
-                                                            // Note: By default the chat is fixed on the left (lg:flex), 
-                                                            // and we just need to ensure the center panel isn't hiding it
-                                                            // We could also focus the chat input if we had a ref
-                                                        }
-                                                    }}
-                                                    disabled={!isLivePlayback}
-                                                    className={`touch-target px-4 sm:px-5 h-[40px] rounded-full flex items-center justify-center gap-2 font-bold text-sm transition-all shadow-sm active:scale-95 ${isLivePlayback
+                                                    onClick={() => handleRaiseDoubt()}
+                                                    disabled={isInDoubtMode || !currentSession}
+                                                    className={`touch-target px-4 sm:px-5 h-[40px] rounded-full flex items-center justify-center gap-2 font-bold text-sm transition-all shadow-sm active:scale-95 ${!isInDoubtMode && currentSession
                                                         ? 'bg-purple-100 hover:bg-purple-200 text-purple-700 dark:bg-purple-900/40 dark:hover:bg-purple-900/60 dark:text-purple-300'
                                                         : 'bg-gray-100 text-gray-400 dark:bg-slate-800 dark:text-slate-500 cursor-not-allowed opacity-60'
                                                         }`}
                                                     aria-label="Raise Doubt"
+                                                    title="Pause the lesson and ask the AI teacher"
                                                 >
                                                     <HelpCircle className="w-4 h-4 shrink-0" />
-                                                    <span className="hidden sm:inline">Raise Doubt</span>
+                                                    <span className="hidden sm:inline">{isInDoubtMode ? 'Doubt Mode' : 'Raise Doubt'}</span>
                                                 </button>
 
                                                 <button

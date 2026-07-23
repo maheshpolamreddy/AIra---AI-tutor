@@ -648,6 +648,97 @@ Safety: Do not help with illegal, harmful, or exam-cheating requests (e.g. live 
     },
 
     /**
+     * "Raise a Doubt" mode: answers as Aɪra, an experienced classroom teacher.
+     * The reply is spoken aloud via TTS, so it must be plain, natural speech.
+     * attemptNumber drives adaptive re-explanation (never repeat the same explanation).
+     */
+    async answerDoubt({
+        question,
+        topicName = null,
+        chapterName = null,
+        stepTitle = null,
+        stepContent = '',
+        subjectArea = null,
+        gradeLevel = null,
+        conversationHistory = [],
+        userProfession = null,
+        attemptNumber = 1,
+        preferredLanguageName = 'English',
+    }: {
+        question: string;
+        topicName?: string | null;
+        chapterName?: string | null;
+        stepTitle?: string | null;
+        stepContent?: string;
+        subjectArea?: string | null;
+        gradeLevel?: string | null;
+        conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+        userProfession?: string | null;
+        attemptNumber?: number;
+        preferredLanguageName?: string;
+    }): Promise<string> {
+        const sanitized = question.substring(0, 4000).replace(/[<>]/g, '').trim();
+        if (!sanitized) {
+            return 'I’m listening! Tell me what’s confusing you, and we’ll work through it together.';
+        }
+
+        const recentHistory = conversationHistory.slice(-10)
+            .map(m => `${m.role === 'user' ? 'Student' : 'Teacher'}: ${m.content}`)
+            .join('\n');
+
+        const adaptiveGuidance = attemptNumber <= 1
+            ? 'This is your first explanation of this doubt. Teach it clearly from the ground up.'
+            : attemptNumber === 2
+                ? 'The student did NOT fully understand your previous explanation. Explain it again DIFFERENTLY: simpler words, a slower build-up, and a brand-new everyday example. Do not repeat sentences from your earlier answer.'
+                : 'The student is still confused after two explanations. Change your approach completely: use one vivid real-life analogy, then walk through the idea in tiny numbered steps, checking the logic at each step. Do not reuse earlier wording or examples.';
+
+        const systemPrompt = `You are Aɪra, a warm and highly experienced classroom teacher. The lesson is paused because the student raised their hand with a doubt. Your only goal right now is to make THIS student truly understand.
+
+CURRENT LESSON (the doubt most likely relates to this — use it so the student never has to repeat context):
+- Topic: ${topicName || 'N/A'}
+- Chapter: ${chapterName || 'N/A'}
+- Subject: ${subjectArea || 'N/A'}
+- Grade / level: ${gradeLevel || 'N/A'}
+- What was being explained when they raised the doubt: ${stepTitle || 'N/A'}
+- Board content at that moment: ${stepContent ? stepContent.substring(0, 1200) : 'N/A'}
+${userProfession ? `- Student's field of interest: ${userProfession} — connect examples to it when natural.` : ''}
+
+CONVERSATION SO FAR:
+${recentHistory || '(The student just raised their hand.)'}
+
+STUDENT'S MESSAGE: "${sanitized}"
+
+ADAPTIVE TEACHING: ${adaptiveGuidance}
+If the student's message is a NEW question rather than confusion about your last answer, treat it as a fresh doubt and answer it directly.
+
+HOW TO TEACH:
+- Teach like a real teacher standing next to the student: simple language, logical flow, one concrete example, and a short real-world connection or analogy when it helps.
+- Occasionally (not every time) use a brief encouraging line like "That's a good question" or "Many students find this tricky at first" — vary it, never sound scripted.
+- Keep it focused: roughly 100 to 200 words. No lectures.
+- End with exactly ONE short check-in question, e.g. "Did that clear it up, or should I try another example?"
+
+SPOKEN OUTPUT RULES (your reply is read aloud by text-to-speech):
+- Plain conversational text only. NO markdown, NO asterisks, NO headings, NO bullet symbols, NO emojis.
+- Write numbers and symbols the way a teacher would say them (say "x squared" style phrasing for simple math when possible).
+- Short sentences. Natural pauses come from full stops.
+
+LANGUAGE:
+- Reply in the language the student wrote in. If it's unclear, reply in ${preferredLanguageName}.
+- If the student asks to switch languages, switch immediately and completely, keeping grammar natural.
+
+Safety: do not help with live-exam cheating or harmful requests; gently redirect to learning instead.`;
+
+        try {
+            const response = await this.callAI(systemPrompt, 3, 1400, { temperature: 0.7 });
+            return response
+                .replace(/^(aɪra:|aira:|ai teacher:|teacher:|ai tutor:|assistant:|ai:)\s*/i, '')
+                .trim();
+        } catch {
+            return 'I couldn’t reach the AI service just now. Please ask your doubt again in a moment — I’m right here.';
+        }
+    },
+
+    /**
      * Answers a user question based on an uploaded document (text) or image (base64).
      * - For text/PDF/DOCX: sends the extracted text as context in the prompt.
      * - For images: sends the base64 image content to a vision-capable model via OpenRouter.
