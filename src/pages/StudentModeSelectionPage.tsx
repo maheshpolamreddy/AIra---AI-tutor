@@ -1,269 +1,487 @@
-
-import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Sparkles, BookOpen, ArrowRight, Layout, Award, Zap, Target, Star } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { motion, useReducedMotion, AnimatePresence } from 'framer-motion';
+import {
+  BookOpen,
+  ArrowRight,
+  Award,
+  Zap,
+  Sparkles,
+  Star,
+  Check,
+} from 'lucide-react';
 import { studentRoutes } from '../utils/routes';
 import PageTransition from '../components/common/PageTransition';
+import AiraLogo from '../components/brand/AiraLogo';
+import { useSettingsStore } from '../stores/settingsStore';
 
-interface ModeTileProps {
+type ModeAccent = 'curriculum' | 'competitive';
+
+interface ModeCardProps {
   title: string;
-  subtitle: string;
   icon: React.ReactNode;
-  color: string;
-  gradient: string;
-  onClick: () => void;
-  delay?: number;
+  accent: ModeAccent;
+  badge: string;
+  onSelect: () => void;
+  isSelecting: boolean;
+  delay: number;
+  reduceMotion: boolean;
 }
 
-function ModeTile({ title, subtitle, icon, color, gradient, onClick, delay = 0 }: ModeTileProps) {
+const accentTokens: Record<
+  ModeAccent,
+  {
+    text: string;
+    bar: string;
+    barHover: string;
+    iconGradient: string;
+    iconGlow: string;
+    arrowHover: string;
+    focusRing: string;
+    badge: string;
+    check: string;
+    pulse: string;
+  }
+> = {
+  curriculum: {
+    text: 'text-[var(--color-curriculum)] dark:text-emerald-300',
+    bar: 'bg-[var(--color-curriculum)]',
+    barHover: 'group-hover:w-[5px]',
+    iconGradient: 'from-emerald-400 via-emerald-500 to-teal-600',
+    iconGlow: 'shadow-emerald-500/30',
+    arrowHover:
+      'group-hover:bg-[var(--color-curriculum)] group-hover:border-[var(--color-curriculum)] group-hover:text-white',
+    focusRing:
+      'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-curriculum)]',
+    badge:
+      'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60',
+    check: 'bg-[var(--color-curriculum)]',
+    pulse: 'bg-emerald-500',
+  },
+  competitive: {
+    text: 'text-[var(--color-competitive)] dark:text-amber-300',
+    bar: 'bg-[var(--color-competitive)]',
+    barHover: 'group-hover:w-[5px]',
+    iconGradient: 'from-amber-400 via-amber-500 to-orange-600',
+    iconGlow: 'shadow-amber-500/30',
+    arrowHover:
+      'group-hover:bg-[var(--color-competitive)] group-hover:border-[var(--color-competitive)] group-hover:text-white',
+    focusRing:
+      'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-competitive)]',
+    badge:
+      'bg-amber-50 text-amber-800 border-amber-200/80 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800/60',
+    check: 'bg-[var(--color-competitive)]',
+    pulse: 'bg-amber-500',
+  },
+};
+
+function ModeCard({
+  title,
+  icon,
+  accent,
+  badge,
+  onSelect,
+  isSelecting,
+  delay,
+  reduceMotion,
+}: ModeCardProps) {
+  const tokens = accentTokens[accent];
+
   return (
     <motion.button
-      onClick={onClick}
-      initial={{ opacity: 0, x: -30 }}
-      animate={{ opacity: 1, x: 0 }}
-      whileHover={{ scale: 1.02, x: 8 }}
-      whileTap={{ scale: 0.98 }}
-      transition={{ duration: 0.6, delay, ease: [0.16, 1, 0.3, 1] }}
-      className="relative group w-full bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl sm:rounded-[2.5rem] p-5 sm:p-7 lg:px-10 flex items-center justify-between shadow-xl shadow-slate-200/50 dark:shadow-none hover:shadow-2xl transition-all duration-500 overflow-hidden"
+      type="button"
+      onClick={onSelect}
+      disabled={isSelecting}
+      aria-label={`Enter ${title}`}
+      aria-busy={isSelecting}
+      initial={reduceMotion ? false : { opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={
+        reduceMotion
+          ? { duration: 0 }
+          : { duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] }
+      }
+      className={`
+        group relative w-full min-h-[48px] text-left
+        rounded-2xl sm:rounded-[20px]
+        pl-5 pr-4 py-4 sm:pl-6 sm:pr-5 sm:py-[18px]
+        bg-[var(--color-surface-elevated)]
+        border border-[var(--color-border-subtle)]
+        shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]
+        dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),0_8px_24px_rgba(0,0,0,0.35)]
+        transition-[transform,box-shadow] duration-150 ease-out
+        hover:-translate-y-0.5
+        hover:shadow-[0_4px_12px_rgba(0,0,0,0.06),0_14px_32px_rgba(0,0,0,0.1)]
+        dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.3),0_14px_32px_rgba(0,0,0,0.45)]
+        ${tokens.focusRing}
+        disabled:cursor-wait
+        overflow-hidden
+      `}
     >
-      {/* 🚀 STYLISH DUAL-BORDER & TINT */}
-      <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/50 to-transparent opacity-50" />
-      <div className={`absolute inset-0 opacity-[0.06] group-hover:opacity-[0.12] transition-opacity duration-500 ${gradient}`} />
-      
-      {/* ✨ SPARKLES */}
-      <div className="absolute inset-0 pointer-events-none opacity-40 group-hover:opacity-100 transition-opacity duration-700">
-        {[...Array(5)].map((_, i) => (
-          <motion.div
-            key={i}
-            className="absolute w-1 h-1 bg-white rounded-full blur-[0.5px]"
-            style={{
-              left: `${15 + Math.random() * 70}%`,
-              top: `${15 + Math.random() * 70}%`,
-            }}
-            animate={{
-              opacity: [0, 1, 0],
-              scale: [0, 1.2, 0],
-              y: [0, -10, 0],
-            }}
-            transition={{
-              duration: 3 + Math.random() * 2,
-              repeat: Infinity,
-              delay: Math.random() * 4,
-              ease: "easeInOut",
-            }}
+      {/* Left accent bar */}
+      <span
+        className={`absolute left-0 top-0 bottom-0 w-1 ${tokens.bar} ${tokens.barHover} transition-[width] duration-150 ease-out rounded-l-2xl`}
+        aria-hidden
+      />
+
+      <span
+        className={`absolute top-3.5 right-3.5 z-20 inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${tokens.badge}`}
+      >
+        {badge}
+      </span>
+
+      <div className="relative z-10 flex items-center gap-4 sm:gap-5">
+        <div
+          className={`
+            relative flex-shrink-0
+            h-14 w-14 sm:h-16 sm:w-16
+            rounded-[14px] sm:rounded-2xl
+            bg-gradient-to-br ${tokens.iconGradient}
+            flex items-center justify-center text-white
+            shadow-lg ${tokens.iconGlow}
+            overflow-hidden
+          `}
+        >
+          {/* Glossy highlight */}
+          <span
+            className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/35 via-white/5 to-transparent"
+            aria-hidden
           />
-        ))}
+          <span className="relative z-10 drop-shadow-sm">{icon}</span>
+        </div>
+
+        <h3
+          className={`flex-1 min-w-0 font-display text-[22px] sm:text-2xl font-semibold tracking-[-0.02em] leading-tight pr-16 ${tokens.text} dark:text-white`}
+        >
+          {title}
+        </h3>
+
+        <div
+          className={`
+            flex-shrink-0 flex items-center justify-center
+            h-10 w-10 rounded-full
+            bg-[var(--color-surface)] border border-[var(--color-border-subtle)]
+            text-[var(--color-text-muted)]
+            transition-all duration-150 ease-out
+            ${tokens.arrowHover}
+          `}
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            {isSelecting ? (
+              <motion.span
+                key="check"
+                initial={reduceMotion ? false : { scale: 0.6, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: reduceMotion ? 0 : 0.15 }}
+                className={`flex items-center justify-center w-full h-full rounded-full text-white ${tokens.check}`}
+              >
+                <Check className="w-4 h-4" strokeWidth={2.5} aria-hidden />
+              </motion.span>
+            ) : (
+              <motion.span
+                key="arrow"
+                initial={false}
+                exit={reduceMotion ? undefined : { opacity: 0 }}
+                className="flex items-center justify-center"
+              >
+                <ArrowRight
+                  className="w-4 h-4 transition-transform duration-150 ease-out group-hover:translate-x-0.5"
+                  aria-hidden
+                />
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
-      <div className="flex items-center gap-6 sm:gap-10 relative z-10 w-full min-w-0">
-        {/* 🧊 3D ICON CONTAINER */}
-        <div className="relative perspective-800">
-          <motion.div 
-            className={`relative w-14 h-14 sm:w-18 sm:h-18 flex-shrink-0 rounded-2xl ${gradient} flex items-center justify-center text-white shadow-[0_20px_40px_-5px_rgba(0,0,0,0.3)] shadow-indigo-500/20 group-hover:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4)] transition-all duration-500`}
-            style={{ transformStyle: 'preserve-3d' }}
-            whileHover={{ 
-              rotateY: 15, 
-              rotateX: -10,
-              translateZ: 20
-            }}
-          >
-            {/* 3D Depth Layers */}
-            <div className="absolute inset-0 rounded-2xl bg-white/10 blur-[2px] -translate-z-4" />
-            <div className="relative z-10 drop-shadow-[0_4px_8px_rgba(0,0,0,0.3)] scale-90 sm:scale-100 transform translate-z-10 text-white">
-              {icon}
-            </div>
-          </motion.div>
+      {isSelecting && (
+        <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden" aria-hidden>
+          <div className={`h-full w-full origin-left animate-mode-select-pulse ${tokens.pulse}`} />
         </div>
-        
-        <div className="text-left flex-1 min-w-0">
-          <h3 className={`text-xl sm:text-2xl font-black ${color} dark:text-white transition-colors tracking-tighter leading-none mb-1 sm:mb-2 truncate`}>{title}</h3>
-          <p className="text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 font-bold opacity-60 uppercase tracking-[0.2em] truncate">{subtitle}</p>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-4 relative z-10 ml-4">
-        {/* 🏹 SMALLER REFINED ARROW */}
-        <div className={`flex items-center justify-center w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-400 border border-slate-100 dark:border-slate-700 group-hover:bg-slate-900 group-hover:text-white dark:group-hover:bg-indigo-600 group-hover:scale-95 group-hover:rotate-12 transition-all duration-300 shadow-sm`}>
-          <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 transition-transform group-hover:translate-x-0.5" />
-        </div>
-      </div>
+      )}
     </motion.button>
   );
 }
 
-export default function StudentModeSelectionPage() {
+function StatPill({
+  value,
+  label,
+  icon,
+  accentClass,
+  delay,
+  reduceMotion,
+}: {
+  value: string;
+  label: string;
+  icon: React.ReactNode;
+  accentClass: string;
+  delay: number;
+  reduceMotion: boolean;
+}) {
+  return (
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={
+        reduceMotion
+          ? { duration: 0 }
+          : { duration: 0.45, delay, ease: [0.16, 1, 0.3, 1] }
+      }
+      className="flex items-center gap-3 rounded-2xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-elevated)]/80 px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+    >
+      <div
+        className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full ${accentClass}`}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0 text-left">
+        <p className="font-display text-xl sm:text-2xl font-bold tracking-[-0.03em] text-[var(--color-text-primary)] leading-none">
+          {value}
+        </p>
+        <p className="mt-1 text-[10px] sm:text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-muted)] truncate">
+          {label}
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
+interface StudentModeSelectionPageProps {
+  /** Optional override for the logo mark SVG/PNG path. */
+  logoSrc?: string;
+}
+
+export default function StudentModeSelectionPage({
+  logoSrc = '/aira-mark.png',
+}: StudentModeSelectionPageProps = {}) {
   const navigate = useNavigate();
+  const prefersReducedMotion = useReducedMotion();
+  const reduceAnimations = useSettingsStore(
+    (s) => s.settings.accessibility.reduceAnimations
+  );
+  const reduceMotion = Boolean(prefersReducedMotion || reduceAnimations);
+
+  const [selecting, setSelecting] = useState<ModeAccent | null>(null);
+
+  const selectMode = useCallback(
+    (mode: ModeAccent, path: string) => {
+      if (selecting) return;
+      setSelecting(mode);
+      const delay = reduceMotion ? 0 : 420;
+      window.setTimeout(() => navigate(path), delay);
+    },
+    [navigate, reduceMotion, selecting]
+  );
+
+  const fadeUp = (delay: number) =>
+    reduceMotion
+      ? {}
+      : {
+          initial: { opacity: 0, y: 16 },
+          animate: { opacity: 1, y: 0 },
+          transition: { duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] as const },
+        };
 
   return (
     <PageTransition>
-      <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#020617] font-sans flex flex-col relative overflow-hidden">
-        
-        {/* ✨ VIBRANT ANIMATED MESH BACKGROUND */}
-        <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden">
-          {/* Floating Blobs with Smooth Animations */}
-          <motion.div 
-            className="absolute top-[-10%] right-[-10%] w-[60%] h-[60%] rounded-full bg-indigo-200/40 dark:bg-indigo-900/10 blur-[100px] sm:blur-[140px]"
-            animate={{ 
-              x: [0, 40, 0],
-              y: [0, -20, 0],
-              scale: [1, 1.05, 1] 
-            }}
-            transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
-          />
-          <motion.div 
-            className="absolute bottom-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-emerald-200/40 dark:bg-emerald-900/10 blur-[90px] sm:blur-[130px]"
-            animate={{ 
-              x: [0, -30, 0],
-              y: [0, 30, 0],
-              scale: [1, 1.1, 1] 
-            }}
-            transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
-          />
-          <motion.div 
-            className="absolute top-[30%] left-[20%] w-[40%] h-[40%] rounded-full bg-orange-200/30 dark:bg-orange-900/10 blur-[110px] sm:blur-[150px]"
-            animate={{ 
-              x: [0, 20, 0],
-              y: [0, 40, 0],
-              scale: [1, 0.95, 1] 
-            }}
-            transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }}
-          />
-          
-          {/* Pattern Overlay */}
-          <div className="absolute inset-0 opacity-[0.03] dark:opacity-[0.05] bg-[radial-gradient(#4F46E5_1px,transparent_1px)] [background-size:30px_30px] sm:[background-size:40px_40px]" />
+      <div className="mode-selection min-h-screen flex flex-col relative overflow-hidden font-sans">
+        {/* Soft brand aurora blobs */}
+        <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden>
+          <div className="absolute -top-[8%] right-[-6%] h-[420px] w-[420px] sm:h-[500px] sm:w-[500px] rounded-full bg-[var(--color-brand)]/[0.08] dark:bg-[var(--color-brand)]/[0.1] blur-[100px] sm:blur-[120px] motion-safe:animate-aurora-drift" />
+          <div className="absolute -bottom-[10%] -left-[8%] h-[360px] w-[360px] sm:h-[440px] sm:w-[440px] rounded-full bg-[var(--color-curriculum)]/[0.08] dark:bg-[var(--color-curriculum)]/[0.07] blur-[90px] sm:blur-[110px] motion-safe:animate-aurora-drift-alt" />
+          <div className="absolute top-[32%] left-[22%] h-[300px] w-[300px] sm:h-[380px] sm:w-[380px] rounded-full bg-[var(--color-competitive)]/[0.07] dark:bg-[var(--color-competitive)]/[0.06] blur-[100px] sm:blur-[130px] motion-safe:animate-aurora-drift" />
         </div>
 
-        {/* REFINED HEADER */}
-        <header className="relative z-50 bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl border-b border-slate-200 dark:border-slate-800 px-6 sm:px-10 py-4 sm:py-6 flex items-center justify-between sticky top-0">
-          <div className="flex items-center gap-6 sm:gap-12">
-            <button onClick={() => navigate(studentRoutes.dashboard)} className="flex items-center gap-3 sm:gap-4 group">
-              <motion.div 
-                className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-indigo-400 flex items-center justify-center text-white shadow-xl shadow-indigo-200 dark:shadow-none group-hover:scale-110 group-hover:rotate-6 transition-all duration-300"
-                whileHover={{ rotate: 12 }}
+        <header className="relative z-50 sticky top-0 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)]/80 backdrop-blur-xl">
+          <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-4 px-5 sm:px-8 lg:px-12 py-3 sm:py-3.5">
+            <div className="flex items-center gap-5 lg:gap-8 min-w-0">
+              <Link
+                to={studentRoutes.dashboard}
+                className="group rounded-lg p-1 -ml-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)] transition-opacity duration-150 hover:opacity-[0.85]"
+                aria-label="Aɪra — go to dashboard"
               >
-                <Sparkles className="w-5 h-5 sm:w-[22px] sm:h-[22px]" />
-              </motion.div>
-              <span className="font-black text-2xl sm:text-3xl tracking-tighter text-slate-900 dark:text-white">Aɪra</span>
-            </button>
-            <nav className="hidden lg:flex items-center gap-1">
-              <div className="h-8 w-[1px] bg-slate-200 dark:bg-slate-800 mx-2" />
-              <div className="px-5 py-2.5 rounded-2xl bg-slate-100/50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 text-[11px] font-black uppercase tracking-[0.25em] flex items-center gap-3">
-                <Layout size={16} className="text-indigo-500/50" />
-                Select Domain
+                <AiraLogo markSrc={logoSrc} height={40} />
+              </Link>
+
+              {/* Segmented control */}
+              <div
+                className="hidden md:inline-flex items-center rounded-full border border-[var(--color-border-subtle)] bg-black/[0.03] dark:bg-white/[0.05] p-1"
+                role="tablist"
+                aria-label="Primary navigation"
+              >
+                <Link
+                  to={studentRoutes.dashboard}
+                  role="tab"
+                  className="rounded-full px-4 py-1.5 text-sm font-medium text-[var(--color-text-muted)] transition-all duration-150 ease-out hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
+                >
+                  Dashboard
+                </Link>
+                <span
+                  role="tab"
+                  aria-selected="true"
+                  aria-current="page"
+                  className="rounded-full px-4 py-1.5 text-sm font-semibold text-[var(--color-text-primary)] bg-[var(--color-surface-elevated)] shadow-sm ring-1 ring-[var(--color-brand)]/20"
+                >
+                  Select Domain
+                </span>
               </div>
-            </nav>
-          </div>
-          
-          <div className="flex items-center gap-6">
-             <div className="hidden sm:flex items-center gap-2 group cursor-pointer px-4 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all">
-                <Zap size={15} className="text-amber-500 fill-amber-500" />
-                <span className="text-xs font-black text-slate-700 dark:text-slate-300">EXPLORE GUIDES</span>
-             </div>
+            </div>
+
+            <Link
+              to="/blog"
+              className="inline-flex items-center gap-2 rounded-xl border border-[var(--color-border-subtle)] bg-transparent px-3.5 py-2 sm:px-4 text-xs sm:text-sm font-semibold text-[var(--color-text-primary)] transition-all duration-150 ease-out hover:-translate-y-0.5 hover:border-[color-mix(in_srgb,var(--color-brand)_35%,transparent)] hover:bg-[var(--color-surface-elevated)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
+            >
+              <Zap className="h-3.5 w-3.5 text-[var(--color-brand)]" aria-hidden />
+              Explore Guides
+            </Link>
           </div>
         </header>
 
-        <div className="flex-1 flex flex-col md:flex-row max-w-7xl mx-auto w-full px-6 sm:px-10 py-8 sm:py-12 gap-10 md:gap-16 lg:gap-24 relative z-10 overflow-y-auto sm:overflow-visible">
-          
-          {/* Left Hero Side */}
-          <div className="w-full md:w-[45%] flex flex-col justify-center text-center md:text-left">
-            <motion.div
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <motion.div 
-                className="inline-flex items-center gap-3 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[10px] sm:text-[11px] font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] mb-6 sm:mb-8 border border-indigo-100 dark:border-indigo-800"
-                whileHover={{ scale: 1.05 }}
+        <main className="relative z-10 flex-1 w-full">
+          <div className="mx-auto grid max-w-[1440px] grid-cols-1 md:grid-cols-12 gap-10 md:gap-12 lg:gap-16 px-5 sm:px-8 lg:px-12 py-16 sm:py-20 lg:py-24">
+            <section className="md:col-span-5 lg:col-span-5 flex flex-col justify-center text-center md:text-left">
+              <motion.div
+                {...fadeUp(0)}
+                className="inline-flex self-center md:self-start items-center gap-2.5 rounded-full border border-[color-mix(in_srgb,var(--color-brand)_22%,transparent)] bg-[color-mix(in_srgb,var(--color-brand)_6%,var(--color-surface-elevated))] px-3.5 py-1.5 mb-6 sm:mb-7"
               >
-                <div className="w-1.5 sm:w-2 h-1.5 sm:h-2 rounded-full bg-indigo-500 animate-[pulse_1.5s_infinite]" />
-                Interactive Selection
+                <span className="relative flex h-2 w-2" aria-hidden>
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--color-brand)] opacity-50 motion-safe:animate-ping" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-brand)]" />
+                </span>
+                <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
+                  Interactive Selection
+                </span>
               </motion.div>
-              
-              <h1 className="text-4xl sm:text-6xl lg:text-8xl font-black text-slate-900 dark:text-white tracking-tighter leading-[0.95] sm:leading-[0.9] mb-6 sm:mb-10">
-                Design Your <br />
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-400">Path.</span>
+
+              <h1 className="font-display font-extrabold tracking-[-0.03em] text-[var(--color-text-primary)] leading-[0.9] mb-5 sm:mb-6">
+                <motion.span
+                  className="block text-[2.5rem] sm:text-5xl lg:text-6xl xl:text-[5.5rem]"
+                  {...fadeUp(0.08)}
+                >
+                  Design Your
+                </motion.span>
+                <motion.span
+                  className="block text-[2.5rem] sm:text-5xl lg:text-6xl xl:text-[5.5rem] text-transparent bg-clip-text bg-gradient-to-r from-[var(--color-brand)] via-[#6366F1] to-[#8B5CF6] dark:from-[#60A5FA] dark:via-[#818CF8] dark:to-[#A78BFA] animate-gradient-shimmer bg-[length:200%_auto]"
+                  {...fadeUp(0.14)}
+                >
+                  Path.
+                </motion.span>
               </h1>
-              
-              <p className="text-base sm:text-xl text-slate-600 dark:text-slate-400 font-bold leading-relaxed mb-8 sm:mb-12 max-w-md mx-auto md:mx-0 opacity-80">
-                A high-performance educational platform built to transform how you learn, compete, and succeed.
+
+              <motion.p
+                className="text-base sm:text-lg leading-relaxed text-[var(--color-text-muted)] max-w-md mx-auto md:mx-0 mb-8 sm:mb-10"
+                {...fadeUp(0.22)}
+              >
+                Choose how you learn — board mastery or national entrance prep — on one focused platform.
+              </motion.p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md mx-auto md:mx-0">
+                <StatPill
+                  value="24/7"
+                  label="AI Mentorship"
+                  icon={<Sparkles className="h-4 w-4 fill-[var(--color-brand)] text-[var(--color-brand)]" aria-hidden />}
+                  accentClass="bg-[color-mix(in_srgb,var(--color-brand)_12%,transparent)]"
+                  delay={0.38}
+                  reduceMotion={reduceMotion}
+                />
+                <StatPill
+                  value="98%"
+                  label="Success Index"
+                  icon={<Star className="h-4 w-4 fill-[var(--color-curriculum)] text-[var(--color-curriculum)]" aria-hidden />}
+                  accentClass="bg-[color-mix(in_srgb,var(--color-curriculum)_12%,transparent)]"
+                  delay={0.46}
+                  reduceMotion={reduceMotion}
+                />
+              </div>
+            </section>
+
+            <section
+              className="md:col-span-7 lg:col-span-7 flex flex-col justify-center"
+              aria-labelledby="available-routes-heading"
+            >
+              <div className="w-full max-w-[560px] md:max-w-[85%] md:ml-auto">
+                <motion.div className="flex items-center gap-4 mb-4 sm:mb-5" {...fadeUp(0.18)}>
+                  <h2
+                    id="available-routes-heading"
+                    className="flex items-center gap-2 text-[11px] sm:text-xs font-semibold uppercase tracking-[0.1em] text-[var(--color-text-muted)] whitespace-nowrap"
+                  >
+                    <span className="h-1 w-1 rounded-full bg-[var(--color-brand)]" aria-hidden />
+                    Available Routes
+                  </h2>
+                  <div className="h-px flex-1 bg-[var(--color-border-subtle)]" aria-hidden />
+                </motion.div>
+
+                <div className="flex flex-col gap-3 sm:gap-3.5">
+                  <ModeCard
+                    title="Curriculum Mode"
+                    icon={<BookOpen className="w-7 h-7 sm:w-8 sm:h-8" strokeWidth={2} aria-hidden />}
+                    accent="curriculum"
+                    badge="Most Popular"
+                    onSelect={() => selectMode('curriculum', studentRoutes.curriculum)}
+                    isSelecting={selecting === 'curriculum'}
+                    delay={0.26}
+                    reduceMotion={reduceMotion}
+                  />
+                  <ModeCard
+                    title="Competitive Mode"
+                    icon={<Award className="w-7 h-7 sm:w-8 sm:h-8" strokeWidth={2} aria-hidden />}
+                    accent="competitive"
+                    badge="New Cohort"
+                    onSelect={() => selectMode('competitive', studentRoutes.competitive)}
+                    isSelecting={selecting === 'competitive'}
+                    delay={0.34}
+                    reduceMotion={reduceMotion}
+                  />
+                </div>
+
+                <motion.p
+                  className="mt-4 text-left text-sm text-[var(--color-text-muted)]"
+                  {...fadeUp(0.42)}
+                >
+                  Switch anytime · 3 min setup
+                </motion.p>
+              </div>
+            </section>
+          </div>
+        </main>
+
+        <footer className="relative z-50 mt-auto border-t border-[var(--color-border-subtle)] bg-[var(--color-surface)]/90 backdrop-blur-xl">
+          <div className="mx-auto flex max-w-[1440px] flex-col gap-8 px-5 sm:px-8 lg:px-12 py-8 sm:py-10 md:flex-row md:items-start md:justify-between">
+            <div className="flex flex-col items-center md:items-start gap-2">
+              <AiraLogo markSrc={logoSrc} height={32} />
+              <p className="text-xs font-medium text-[var(--color-text-muted)]">
+                Premium Learning Ecosystem
               </p>
-
-              <div className="grid grid-cols-2 gap-4 sm:gap-8 max-w-sm mx-auto md:mx-0">
-                <div className="flex flex-col gap-1 group">
-                  <span className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tighter group-hover:text-indigo-600 transition-colors">12K+</span>
-                  <div className="flex items-center justify-center md:justify-start gap-2">
-                    <Target size={14} className="text-indigo-500" />
-                    <span className="text-[10px] sm:text-[11px] font-black text-slate-400 uppercase tracking-widest">Global Learners</span>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1 group">
-                  <span className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tighter group-hover:text-emerald-500 transition-colors">98%</span>
-                  <div className="flex items-center justify-center md:justify-start gap-2">
-                    <Star size={14} className="text-emerald-500" />
-                    <span className="text-[10px] sm:text-[11px] font-black text-slate-400 uppercase tracking-widest">Success Index</span>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-
-          {/* Right Mode Side */}
-          <div className="w-full md:w-[55%] flex flex-col justify-center gap-6 sm:gap-8 pt-4 md:pt-0">
-            <div className="flex items-center gap-4 sm:gap-6 mb-2">
-               <h4 className="text-[10px] sm:text-[12px] font-black text-slate-400 uppercase tracking-[0.25em] sm:tracking-[0.3em] whitespace-nowrap">Available Routes</h4>
-               <div className="h-[2px] w-full bg-indigo-100 dark:bg-slate-800 rounded-full" />
             </div>
 
-            <div className="flex flex-col gap-4 sm:gap-5">
-              <ModeTile
-                title="Curriculum Mode"
-                subtitle="ACADEMIC BOARD EXCELLENCE"
-                icon={<BookOpen className="w-7 h-7 sm:w-9 sm:h-9" />}
-                color="text-emerald-600"
-                gradient="bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-500"
-                onClick={() => navigate(studentRoutes.curriculum)}
-                delay={0.1}
-              />
+            <nav className="flex flex-wrap justify-center gap-x-8 gap-y-3" aria-label="Footer">
+              {(
+                [
+                  { label: 'Curriculum', to: studentRoutes.curriculum },
+                  { label: 'Competitive', to: studentRoutes.competitive },
+                  { label: 'Privacy', to: '/privacy' },
+                  { label: 'Terms', to: '/terms' },
+                  { label: 'Support', to: '/about' },
+                ] as const
+              ).map((link) => (
+                <Link
+                  key={link.label}
+                  to={link.to}
+                  className="group relative text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
+                >
+                  {link.label}
+                  <span className="absolute -bottom-0.5 left-0 h-px w-0 bg-current transition-all duration-150 group-hover:w-full" aria-hidden />
+                </Link>
+              ))}
+            </nav>
 
-              <ModeTile
-                title="Competitive Mode"
-                subtitle="NATIONAL ENTRANCE ARENA"
-                icon={<Award className="w-7 h-7 sm:w-9 sm:h-9" />}
-                color="text-orange-600"
-                gradient="bg-gradient-to-br from-orange-500 via-amber-500 to-amber-600"
-                onClick={() => navigate(studentRoutes.competitive)}
-                delay={0.2}
-              />
-            </div>
-
+            <p className="text-center md:text-right text-xs font-medium text-slate-500 dark:text-slate-400">
+              © {new Date().getFullYear()} Aɪra. All rights reserved.
+            </p>
           </div>
-
-        </div>
-
-        {/* MODERN FOOTER */}
-        <footer className="relative z-50 px-6 sm:px-10 py-6 sm:py-10 border-t border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl mt-auto">
-           <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 sm:gap-10">
-              <div className="flex flex-col items-center md:items-start gap-1 sm:gap-2">
-                <span className="font-black text-xl tracking-tighter text-slate-900 dark:text-white">Aɪra</span>
-                <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] sm:tracking-[0.25em]">Premium Learning Ecosystem</p>
-              </div>
-              
-              <div className="h-[1px] w-12 bg-slate-200 dark:bg-slate-800 hidden md:block" />
-              
-              <div className="flex flex-wrap justify-center items-center gap-6 sm:gap-10">
-                 {['Curriculum', 'Competitive', 'Safety', 'Ethics', 'Support'].map(link => (
-                   <button key={link} className="text-[10px] sm:text-[11px] font-black text-slate-500 hover:text-indigo-600 uppercase tracking-[0.15em] sm:tracking-[0.2em] transition-colors">{link}</button>
-                 ))}
-              </div>
-              
-              <div className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest text-center md:text-right">
-                © 2024 AIra. All Rights Reserved.
-              </div>
-           </div>
         </footer>
-
       </div>
     </PageTransition>
   );
 }
-

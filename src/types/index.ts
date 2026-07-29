@@ -396,6 +396,8 @@ export interface ChatMessage {
     content: string;
     timestamp: string;
     attachments?: Attachment[];
+    /** True while tokens are still arriving for this AI message */
+    isStreaming?: boolean;
 }
 
 export interface Attachment {

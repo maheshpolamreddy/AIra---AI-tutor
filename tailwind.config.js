@@ -58,7 +58,7 @@ export default {
             },
             fontFamily: {
                 sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-                display: ['Inter', 'system-ui', 'sans-serif'],
+                display: ['"Inter Tight"', 'Inter', 'system-ui', 'sans-serif'],
             },
             backgroundImage: {
                 'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
@@ -85,6 +85,10 @@ export default {
                 'fade-in': 'fade-in 0.5s ease-out',
                 'slide-up': 'slide-up 0.5s ease-out',
                 'slide-in-right': 'slide-in-right 0.3s ease-out',
+                'gradient-shimmer': 'gradient-shimmer 4s ease-in-out infinite',
+                'aurora-drift': 'aurora-drift 18s ease-in-out infinite',
+                'aurora-drift-alt': 'aurora-drift-alt 22s ease-in-out infinite',
+                'mode-select-pulse': 'mode-select-pulse 0.42s ease-out forwards',
             },
             keyframes: {
                 float: {
@@ -98,6 +102,22 @@ export default {
                 shimmer: {
                     '0%': { backgroundPosition: '-200% 0' },
                     '100%': { backgroundPosition: '200% 0' },
+                },
+                'gradient-shimmer': {
+                    '0%, 100%': { backgroundPosition: '0% 50%' },
+                    '50%': { backgroundPosition: '100% 50%' },
+                },
+                'aurora-drift': {
+                    '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+                    '50%': { transform: 'translate(24px, -16px) scale(1.05)' },
+                },
+                'aurora-drift-alt': {
+                    '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+                    '50%': { transform: 'translate(-20px, 20px) scale(1.08)' },
+                },
+                'mode-select-pulse': {
+                    '0%': { transform: 'scaleX(0)', opacity: '1' },
+                    '100%': { transform: 'scaleX(1)', opacity: '0.85' },
                 },
                 sparkle: {
                     '0%, 100%': { opacity: '1', transform: 'scale(1)' },

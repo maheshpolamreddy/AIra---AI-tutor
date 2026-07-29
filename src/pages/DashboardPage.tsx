@@ -85,9 +85,10 @@ export default function DashboardPage() {
 
     const handleSwitchRole = () => {
         toast.info('Switching mission profile...');
-        setTimeout(() => {
-            navigate('/login');
-        }, 1000);
+        // Must clear the session first — navigating to /login while still
+        // authenticated leaves a stale session and bounces back via redirects.
+        logout();
+        navigate('/login');
     };
 
     const handleStartTopic = (topicId: string) => {

@@ -62,6 +62,8 @@ const SettingsPage = lazy(() => import('./SettingsPage'));
 const ProfilePage = lazy(() => import('./ProfilePage'));
 import { aiService } from '../services/aiService';
 import { extractTextFromFile } from '../utils/documentParser';
+import ChatMessageBubble, { ChatThinkingIndicator } from '../components/teaching/ChatMessageBubble';
+import { normalizeChatContent } from '../utils/chatFormat';
 const DiagramCanvas = lazy(() => import('../components/teaching/DiagramCanvas'));
 import Breadcrumbs, { BreadcrumbItem } from '../components/common/Breadcrumbs';
 import EmojiMascot from '../components/mascot/EmojiMascot';
@@ -214,6 +216,8 @@ export default function TeachingPage() {
 
     // ── "Raise a Doubt" interactive teacher (chat panel) ─────────────────────
     const [doubtSpeaking, setDoubtSpeaking] = useState(false);
+    /** Id of the chat message currently being spoken aloud (drives the bubble speaking indicator). */
+    const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
     const [isListening, setIsListening] = useState(false);
     /** Hands-free voice conversation with the AI teacher (auto listen → auto send → spoken reply → listen again). */
     const [isTeacherMode, setIsTeacherMode] = useState(false);
@@ -229,6 +233,26 @@ export default function TeachingPage() {
     /** Consecutive listening turns that ended with silence — stop auto-relistening after a couple. */
     const emptyListenCountRef = useRef(0);
     const chatInputRef = useRef<HTMLInputElement>(null);
+    /** Chat scroll container — powers smart auto-scroll + "scroll to latest". */
+    const chatScrollRef = useRef<HTMLDivElement>(null);
+    /** True while the student is at (or near) the bottom of the conversation. */
+    const chatNearBottomRef = useRef(true);
+    const [showScrollLatest, setShowScrollLatest] = useState(false);
+
+    const scrollChatToBottom = (smooth = true) => {
+        const el = chatScrollRef.current;
+        if (!el) return;
+        el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    };
+
+    const handleChatScroll = () => {
+        const el = chatScrollRef.current;
+        if (!el) return;
+        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        const near = distanceFromBottom < 80;
+        chatNearBottomRef.current = near;
+        setShowScrollLatest(prev => (prev === !near ? prev : !near));
+    };
     /**
      * Latest-closure dispatchers for the voice loop. Recognition callbacks and TTS
      * .then() chains outlive the render they were created in; calling the captured
@@ -245,10 +269,11 @@ export default function TeachingPage() {
     const doubtLanguageName = DOUBT_LANGUAGE_NAMES[doubtTtsLanguage] || 'English';
 
     /** Speak a doubt-teacher message aloud (skipped while muted). Resolves when playback ends. */
-    const speakForDoubt = async (text: string) => {
+    const speakForDoubt = async (text: string, messageId?: string) => {
         if (isMuted) return;
         const seq = ++doubtSpeechSeqRef.current;
         setDoubtSpeaking(true);
+        if (messageId) setSpeakingMessageId(messageId);
         try {
             await speakDoubtText(text, {
                 language: doubtTtsLanguage,
@@ -257,7 +282,10 @@ export default function TeachingPage() {
                 voiceName: doubtTtsVoiceName,
             });
         } finally {
-            if (seq === doubtSpeechSeqRef.current && isMountedRef.current) setDoubtSpeaking(false);
+            if (seq === doubtSpeechSeqRef.current && isMountedRef.current) {
+                setDoubtSpeaking(false);
+                setSpeakingMessageId(null);
+            }
         }
     };
 
@@ -369,7 +397,9 @@ export default function TeachingPage() {
         } else {
             setCenterMaximized(false);
             setRightMaximized(false);
+            setChatMaximized(false);
             setCenterPanelVisible(true);
+            setChatPanelVisible(true);
         }
         const focusTimeout = setTimeout(() => chatInputRef.current?.focus(), 400);
         timeoutRefs.current.push(focusTimeout);
@@ -394,13 +424,14 @@ export default function TeachingPage() {
         emptyListenCountRef.current = 0;
 
         const greeting = "Hi! I'm here to help. What's your doubt? Just ask me in your own words, and I'll explain it step by step.";
+        const greetingId = `teacher-greet-${Date.now()}`;
         setChatMessages(prev => [...prev, {
-            id: `teacher-greet-${Date.now()}`,
+            id: greetingId,
             type: 'ai',
             content: greeting,
             timestamp: new Date().toISOString(),
         }]);
-        void speakForDoubt(greeting).then(() => {
+        void speakForDoubt(greeting, greetingId).then(() => {
             if (teacherModeRef.current && useTeachingStore.getState().isInDoubtMode && isMountedRef.current) {
                 startListeningRef.current();
             }
@@ -503,9 +534,11 @@ export default function TeachingPage() {
     // Panel visibility states for minimize/maximize
     const [centerPanelVisible, setCenterPanelVisible] = useState(true);
     const [rightPanelVisible, setRightPanelVisible] = useState(true);
+    const [chatPanelVisible, setChatPanelVisible] = useState(true);
     // Panel maximize states
     const [centerMaximized, setCenterMaximized] = useState(false);
     const [rightMaximized, setRightMaximized] = useState(false);
+    const [chatMaximized, setChatMaximized] = useState(false);
     // Store previous visibility states before maximizing
     // (Removed in favor of purely CSS flex-based collapsing)
     const [completedQuizCount, setCompletedQuizCount] = useState(2); // Starting with 2 as per user request example
@@ -578,6 +611,14 @@ export default function TeachingPage() {
 
     // Speech logic moved to useSpeech hook
 
+    // Smart auto-scroll: follow new/streaming messages only while the student
+    // is already at the bottom; never yank them away from older messages.
+    useEffect(() => {
+        if (chatNearBottomRef.current) {
+            scrollChatToBottom(false);
+        }
+    }, [chatMessages, isChatLoading]);
+
 
 
     const handleSendMessage = async (overrideText?: string) => {
@@ -602,6 +643,7 @@ export default function TeachingPage() {
         if (doubtSpeaking) {
             stopDoubtSpeech();
             setDoubtSpeaking(false);
+            setSpeakingMessageId(null);
         }
 
         // Build message content with file info
@@ -627,6 +669,33 @@ export default function TeachingPage() {
         setUploadedChatFiles([]);
         setIsChatLoading(true);
 
+        const aiMessageId = (Date.now() + 1).toString();
+        const placeholderAi: ChatMessage = {
+            id: aiMessageId,
+            type: 'ai',
+            content: '',
+            timestamp: new Date().toISOString(),
+            isStreaming: true,
+        };
+        setChatMessages(prev => [...prev, placeholderAi]);
+
+        const updateStream = (_delta: string, full: string) => {
+            if (!isMountedRef.current) return;
+            setChatMessages(prev => prev.map(m =>
+                m.id === aiMessageId ? { ...m, content: full } : m
+            ));
+        };
+
+        const finalizeAiMessage = (rawText: string) => {
+            const finalContent = normalizeChatContent(rawText);
+            setChatMessages(prev => prev.map(m =>
+                m.id === aiMessageId
+                    ? { ...m, content: finalContent, isStreaming: false }
+                    : m
+            ));
+            return finalContent;
+        };
+
         // Last 6 turns including this user message (fixes stale closure from pre-update chatMessages)
         const historySnapshot = [...chatMessages, userMessage].slice(-6).map(m => ({
             role: (m.type === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
@@ -637,33 +706,38 @@ export default function TeachingPage() {
             let aiText: string;
 
             // ── DOCUMENT / IMAGE PATH ────────────────────────────────────────────
-            // When files are attached, bypass the sendChatMessage classifier entirely.
-            // Route directly to answerDocumentQuestion so the AI always uses file content.
             if (sentFiles.length > 0) {
                 const question = sentMessage || 'Please explain the content of this file.';
 
                 const imageStillLoading = sentFiles.some(f => isImageLikeFile(f) && !f.dataUrl);
                 if (imageStillLoading) {
                     aiText = 'Your image is still loading. Please wait a second and send again.';
+                    finalizeAiMessage(aiText);
                 } else {
-                    // Priority 1: image file (vision AI) — use MIME or extension (MIME is often empty on mobile)
                     const imageFile = sentFiles.find(f => isImageLikeFile(f) && f.dataUrl);
                     if (imageFile?.dataUrl) {
-                        aiText = await aiService.answerDocumentQuestion(`__IMAGE_BASE64__${imageFile.dataUrl}`, question);
+                        aiText = await aiService.streamDocumentQuestion(
+                            `__IMAGE_BASE64__${imageFile.dataUrl}`,
+                            question,
+                            updateStream,
+                        );
                     } else {
-                        // Priority 2: text doc (PDF / DOCX / TXT already parsed into dataUrl field)
                         const docFile = sentFiles.find(f => !isImageLikeFile(f) && f.dataUrl);
                         if (docFile?.dataUrl) {
-                            aiText = await aiService.answerDocumentQuestion(docFile.dataUrl, question);
+                            aiText = await aiService.streamDocumentQuestion(
+                                docFile.dataUrl,
+                                question,
+                                updateStream,
+                            );
                         } else {
                             aiText = 'Your file is still being processed. Please wait a moment and try again.';
+                            finalizeAiMessage(aiText);
                         }
                     }
                 }
             } else if (inDoubtMode) {
-                // ── DOUBT MODE: Aɪra teacher persona, spoken aloud, adaptive ────
                 doubtAnswerCountRef.current += 1;
-                aiText = await aiService.answerDoubt({
+                aiText = await aiService.streamAnswerDoubt({
                     question: sentMessage,
                     topicName: currentSession?.topicName ?? null,
                     chapterName: topicInfo.chapterName ?? null,
@@ -675,10 +749,9 @@ export default function TeachingPage() {
                     userProfession: profile?.profession?.name ?? null,
                     attemptNumber: doubtAnswerCountRef.current,
                     preferredLanguageName: doubtLanguageName,
-                });
+                }, updateStream);
             } else {
-                // ── REGULAR CHAT PATH (no files) ─────────────────────────────────
-                aiText = await aiService.sendChatMessage({
+                aiText = await aiService.streamChatMessage({
                     userMessage: sentMessage,
                     topicName: currentSession?.topicName ?? null,
                     chapterName: topicInfo.chapterName ?? null,
@@ -688,23 +761,20 @@ export default function TeachingPage() {
                     gradeLevel: topicInfo.gradeLevel,
                     conversationHistory: historySnapshot,
                     userProfession: profile?.profession?.name ?? null,
-                });
+                }, updateStream);
             }
 
             if (!isMountedRef.current) return;
 
-            const aiResponse: ChatMessage = {
-                id: (Date.now() + 1).toString(),
-                type: 'ai',
-                content: aiText,
-                timestamp: new Date().toISOString(),
-            };
-            setChatMessages(prev => [...prev, aiResponse]);
+            let finalContent: string;
+            if (aiText.includes('still loading') || aiText.includes('still being processed')) {
+                finalContent = aiText;
+            } else {
+                finalContent = finalizeAiMessage(aiText);
+            }
 
-            // In doubt mode the teacher speaks every answer aloud; in hands-free
-            // teacher mode the mic re-opens once the reply finishes (turn-taking).
             if (inDoubtMode) {
-                void speakForDoubt(aiText).then(() => {
+                void speakForDoubt(finalContent, aiMessageId).then(() => {
                     if (teacherModeRef.current && useTeachingStore.getState().isInDoubtMode && isMountedRef.current) {
                         startListeningRef.current();
                     }
@@ -714,16 +784,9 @@ export default function TeachingPage() {
             if (!isMountedRef.current) return;
             console.warn('[TeachingPage] Chat request failed:', err);
             const fallbackText = `Sorry, I had trouble connecting to the AI service. Please try again in a moment!`;
-            const fallbackResponse: ChatMessage = {
-                id: (Date.now() + 1).toString(),
-                type: 'ai',
-                content: fallbackText,
-                timestamp: new Date().toISOString(),
-            };
-            setChatMessages(prev => [...prev, fallbackResponse]);
-            // Keep the hands-free conversation alive across a network hiccup
+            finalizeAiMessage(fallbackText);
             if (inDoubtMode) {
-                void speakForDoubt(fallbackText).then(() => {
+                void speakForDoubt(fallbackText, aiMessageId).then(() => {
                     if (teacherModeRef.current && useTeachingStore.getState().isInDoubtMode && isMountedRef.current) {
                         startListeningRef.current();
                     }
@@ -772,8 +835,10 @@ export default function TeachingPage() {
         // Force panels back to their default visible/non-maximized state on mobile
         setCenterMaximized(false);
         setRightMaximized(false);
+        setChatMaximized(false);
         setCenterPanelVisible(true);
         setRightPanelVisible(true);
+        setChatPanelVisible(true);
     }, [isMobile]);
 
 
@@ -1089,12 +1154,12 @@ export default function TeachingPage() {
                     layout
                     className={`flex-1 w-full flex overflow-y-auto overflow-x-hidden lg:overflow-hidden relative min-h-0 ${isMobile ? 'flex-col' : 'lg:flex-row flex-col items-stretch'}`}
                     animate={isMobile ? {} : {
-                        paddingTop: (centerMaximized || rightMaximized) ? 0 : 'var(--teaching-content-margin-y)',
-                        paddingBottom: (centerMaximized || rightMaximized) ? 0 : 'var(--teaching-content-margin-y)',
-                        paddingLeft: (centerMaximized || rightMaximized) ? 0 : 'max(var(--teaching-content-padding-x), var(--safe-left))',
-                        paddingRight: (centerMaximized || rightMaximized) ? 0 : 'max(var(--teaching-content-padding-x), var(--safe-right))',
-                        gap: (centerMaximized || rightMaximized) ? 0 : 'var(--teaching-panels-gap)',
-                        background: (centerMaximized || rightMaximized) ? 'var(--teaching-panel-bg)' : 'transparent',
+                        paddingTop: (centerMaximized || rightMaximized || chatMaximized) ? 0 : 'var(--teaching-content-margin-y)',
+                        paddingBottom: (centerMaximized || rightMaximized || chatMaximized) ? 0 : 'var(--teaching-content-margin-y)',
+                        paddingLeft: (centerMaximized || rightMaximized || chatMaximized) ? 0 : 'max(var(--teaching-content-padding-x), var(--safe-left))',
+                        paddingRight: (centerMaximized || rightMaximized || chatMaximized) ? 0 : 'max(var(--teaching-content-padding-x), var(--safe-right))',
+                        gap: (centerMaximized || rightMaximized || chatMaximized) ? 0 : 'var(--teaching-panels-gap)',
+                        background: (centerMaximized || rightMaximized || chatMaximized) ? 'var(--teaching-panel-bg)' : 'transparent',
                     }}
                     style={isMobile ? { minHeight: 0, paddingLeft: 'var(--safe-left)', paddingRight: 'var(--safe-right)' } : {
                         height: '100%',
@@ -1103,41 +1168,118 @@ export default function TeachingPage() {
                     }}
                     transition={{ type: 'spring', damping: 28, stiffness: 300 }}
                 >
+                    {/* Collapsed Chat Panel Expander (desktop/tablet only) */}
+                    <AnimatePresence mode="popLayout">
+                        {!isMobile && !chatPanelVisible && !chatMaximized && !centerMaximized && !rightMaximized && (
+                            <motion.div
+                                layout
+                                initial={{ opacity: 0, width: 0 }}
+                                animate={{ opacity: 1, width: 40 }}
+                                exit={{ opacity: 0, width: 0 }}
+                                className="flex flex-col items-center justify-center border-r border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-900 overflow-hidden order-1 lg:order-1"
+                            >
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setChatPanelVisible(true);
+                                        setChatMaximized(false);
+                                    }}
+                                    className="p-2 hover:bg-gray-200 dark:hover:bg-slate-800 rounded-lg transition-colors text-gray-600 dark:text-gray-400"
+                                    title="Expand Chat Panel"
+                                    aria-label="Expand Chat Panel"
+                                >
+                                    <ChevronRight className="w-5 h-5 shrink-0" />
+                                </button>
+                                <span className="text-xs text-gray-500 dark:text-gray-400 writing-mode-vertical rotate-180 mt-2 whitespace-nowrap font-bold uppercase tracking-widest">Chat</span>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
                     {/* ═══════════════════════ CHAT PANEL (Left — 23%) ═══════════════════════ */}
-                    {/* Positioned middle in tablet stack (order-2) */}
+                    <AnimatePresence mode="popLayout">
+                        {chatPanelVisible && (
                     <motion.div
                         layout
-                        initial={isMobile ? { opacity: 0 } : { opacity: 1, flex: '23 23 0%' }}
+                        initial={isMobile ? { opacity: 0 } : { opacity: 0, flex: '0 0 0px' }}
                         animate={isMobile ? { opacity: mobilePanel === 'home' ? 1 : 0 } : {
-                            opacity: (centerMaximized || rightMaximized) ? 0 : 1,
-                            flex: (centerMaximized || rightMaximized) ? '0 0 0px' : '23 23 0%',
+                            opacity: ((centerMaximized || rightMaximized) && !chatMaximized) ? 0 : 1,
+                            flex: ((centerMaximized || rightMaximized) && !chatMaximized) ? '0 0 0px' : (chatMaximized ? '1 1 100%' : '23 23 0%'),
+                            borderRadius: chatMaximized ? 0 : 'var(--teaching-panel-radius)',
+                            boxShadow: chatMaximized ? 'none' : 'var(--teaching-panel-shadow)',
                         }}
-                        transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+                        exit={isMobile ? { opacity: 0 } : { opacity: 0, flex: '0 0 0px' }}
+                        transition={{ type: 'spring', damping: 28, stiffness: 300, duration: reduceAnimations ? 0 : 0.35 }}
                         className={`${isMobile ? 'absolute inset-0 w-full h-full' : 'relative min-w-0'} flex flex-col z-30 lg:z-auto order-2 lg:order-1 ${mobilePanel === 'home' ? 'flex' : 'hidden lg:flex md:flex'}`}
                         style={isMobile ? {
                             display: mobilePanel === 'home' ? 'flex' : 'none',
                             pointerEvents: mobilePanel === 'home' ? 'auto' : 'none'
                         } : {
                             background: 'var(--teaching-panel-bg)',
-                            borderRadius: 'var(--teaching-panel-radius)',
-                            boxShadow: 'var(--teaching-panel-shadow)',
                             overflow: 'hidden',
                             minHeight: 0,
                             alignSelf: 'stretch',
                             padding: 0,
                         }}
                     >
-                        {/* Panel Header — centered title, 56–64px, divider */}
+                        {/* Panel Header — centered title with minimize / maximize controls */}
                         <div
-                            className="hidden md:flex items-center justify-center shrink-0 border-b bg-transparent"
+                            className="hidden md:flex items-center justify-center shrink-0 border-b bg-transparent relative"
                             style={{
-                                minHeight: '56px',
-                                height: 'clamp(48px, 8vh, 60px)',
+                                minHeight: chatMaximized ? '56px' : 'clamp(48px, 8vh, 60px)',
+                                height: chatMaximized ? '56px' : 'clamp(48px, 8vh, 60px)',
                                 borderColor: 'var(--teaching-panel-divider)',
-                                borderRadius: 'var(--teaching-panel-radius) var(--teaching-panel-radius) 0 0',
+                                borderRadius: chatMaximized ? 0 : 'var(--teaching-panel-radius) var(--teaching-panel-radius) 0 0',
+                                background: chatMaximized ? 'rgba(245, 244, 248, 0.97)' : undefined,
+                                backdropFilter: chatMaximized ? 'saturate(180%) blur(10px)' : undefined,
                             }}
                         >
-                            <h2 className="text-base sm:text-lg font-medium text-[var(--teaching-panel-text)] truncate px-2" style={{ letterSpacing: '0.01em' }}>Chat Panel</h2>
+                            {!chatMaximized && (
+                                <h2 className="text-base sm:text-lg font-medium text-[var(--teaching-panel-text)] truncate px-2" style={{ letterSpacing: '0.01em' }}>Chat Panel</h2>
+                            )}
+                            {chatMaximized && (
+                                <h2 className="text-base font-medium text-[var(--teaching-panel-text)]" style={{ letterSpacing: '0.01em' }}>Chat Panel</h2>
+                            )}
+                            {!isMobile && (
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                                    {!chatMaximized && (
+                                        <motion.button
+                                            type="button"
+                                            onClick={() => setChatPanelVisible(false)}
+                                            className="rounded-lg transition-colors flex items-center justify-center p-2 hover:bg-gray-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 touch-target min-w-[40px] min-h-[40px]"
+                                            whileTap={{ scale: 0.92 }}
+                                            whileHover={{ scale: 1.02 }}
+                                            transition={{ type: 'spring', damping: 20, stiffness: 400 }}
+                                            aria-label="Minimize Chat Panel"
+                                            title="Minimize Chat Panel"
+                                        >
+                                            <ChevronLeft className="w-4 h-4" />
+                                        </motion.button>
+                                    )}
+                                    <motion.button
+                                        type="button"
+                                        onClick={() => {
+                                            if (chatMaximized) {
+                                                setChatMaximized(false);
+                                            } else {
+                                                setChatMaximized(true);
+                                                setCenterMaximized(false);
+                                                setRightMaximized(false);
+                                            }
+                                        }}
+                                        className={`rounded-lg transition-colors flex items-center justify-center touch-target min-w-[40px] min-h-[40px] ${chatMaximized
+                                            ? 'p-2.5 bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800 border border-[var(--teaching-panel-divider)] text-[var(--teaching-panel-text)] shadow-sm'
+                                            : 'p-2 hover:bg-gray-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                                            }`}
+                                        whileTap={{ scale: 0.92 }}
+                                        whileHover={{ scale: 1.02 }}
+                                        transition={{ type: 'spring', damping: 20, stiffness: 400 }}
+                                        aria-label={chatMaximized ? 'Exit full screen' : 'Full screen Chat Panel'}
+                                        title={chatMaximized ? 'Exit full screen' : 'Full screen'}
+                                    >
+                                        {chatMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                                    </motion.button>
+                                </div>
+                            )}
                         </div>
 
                         {/* Doubt Mode banner — lesson paused, teacher is listening */}
@@ -1156,7 +1298,7 @@ export default function TeachingPage() {
                                             {doubtSpeaking ? (
                                                 <button
                                                     type="button"
-                                                    onClick={() => { stopDoubtSpeech(); setDoubtSpeaking(false); }}
+                                                    onClick={() => { stopDoubtSpeech(); setDoubtSpeaking(false); setSpeakingMessageId(null); }}
                                                     className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
                                                     title="Stop the teacher's voice"
                                                     aria-label="Stop speaking"
@@ -1190,64 +1332,55 @@ export default function TeachingPage() {
                             )}
                         </AnimatePresence>
 
-                        {/* Chat Messages — scrollable, responsive padding */}
+                        {/* Chat Messages — scrollable, smart auto-scroll, responsive padding */}
                         <div
-                            className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 sm:space-y-4 min-h-0"
+                            ref={chatScrollRef}
+                            onScroll={handleChatScroll}
+                            className="flex-1 overflow-y-auto overflow-x-hidden space-y-4 sm:space-y-5 min-h-0"
                             style={{ padding: 'clamp(12px, 3vw, var(--space-lg))' }}
                         >
                             {chatMessages.map((msg) => (
-                                msg.type === 'system' ? (
-                                    <motion.div
-                                        key={msg.id}
-                                        initial={reduceAnimations ? false : { opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        transition={{ duration: reduceAnimations ? 0 : 0.25 }}
-                                        className="flex justify-center"
-                                    >
-                                        <span className="text-[11px] sm:text-xs text-gray-400 dark:text-slate-500 italic text-center px-3">
-                                            {msg.content}
-                                        </span>
-                                    </motion.div>
-                                ) : (
-                                    <motion.div
-                                        key={msg.id}
-                                        initial={reduceAnimations ? false : { opacity: 0, y: 8 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ duration: reduceAnimations ? 0 : 0.25, ease: 'easeOut' }}
-                                        className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
-                                    >
-                                        <div className={`max-w-[90%] px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm break-words ${msg.type === 'user'
-                                            ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-2xl rounded-br-md shadow-sm'
-                                            : 'bg-white dark:bg-slate-800 shadow-sm border border-gray-100 dark:border-slate-700 rounded-2xl rounded-bl-md text-gray-700 dark:text-gray-100'
-                                            }`}>
-                                            {msg.content}
-                                        </div>
-                                    </motion.div>
-                                )
+                                <ChatMessageBubble
+                                    key={msg.id}
+                                    message={msg}
+                                    reduceAnimations={reduceAnimations}
+                                    isSpeaking={speakingMessageId === msg.id}
+                                />
                             ))}
-                            {/* AI Thinking indicator */}
-                            {isChatLoading && (
-                                <motion.div
-                                    initial={{ opacity: 0, y: 8 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="flex justify-start"
-                                >
-                                    <div className="bg-white dark:bg-slate-800 shadow-sm border border-gray-100 dark:border-slate-700 rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-1.5">
-                                        <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse-slow" />
-                                        <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse-slow [animation-delay:0.15s]" />
-                                        <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse-slow [animation-delay:0.3s]" />
-                                    </div>
-                                </motion.div>
+                            {isChatLoading && !chatMessages.some(m => m.isStreaming) && (
+                                <ChatThinkingIndicator />
                             )}
                         </div>
 
-                        {/* Chat Input Bar — seamless responsive pill with file upload */}
+                        {/* Scroll to latest — shown when the student scrolls up */}
+                        <AnimatePresence>
+                            {showScrollLatest && (
+                                <motion.button
+                                    type="button"
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: 8 }}
+                                    transition={{ duration: reduceAnimations ? 0 : 0.2 }}
+                                    className="chat-scroll-latest"
+                                    onClick={() => {
+                                        chatNearBottomRef.current = true;
+                                        setShowScrollLatest(false);
+                                        scrollChatToBottom(!reduceAnimations);
+                                    }}
+                                    aria-label="Scroll to latest message"
+                                >
+                                    <ArrowUp className="w-3.5 h-3.5 rotate-180" />
+                                    Scroll to latest
+                                </motion.button>
+                            )}
+                        </AnimatePresence>
+
+                        {/* Chat Input Bar — sticky glassmorphism pill with file upload */}
                         <div
-                            className="shrink-0 border-t"
+                            className="shrink-0 border-t chat-input-glass"
                             style={{
                                 padding: '10px 12px',
                                 borderColor: 'var(--teaching-panel-divider)',
-                                background: 'var(--teaching-panel-bg)',
                             }}
                         >
                             {/* File preview chips */}
@@ -1411,14 +1544,14 @@ export default function TeachingPage() {
                                     type="button"
                                     onClick={() => (isTeacherMode ? deactivateTeacherMode() : activateTeacherMode())}
                                     disabled={!currentSession}
-                                    className={`shrink-0 flex items-center justify-center rounded-full transition-all active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed ${isTeacherMode ? 'ring-2 ring-purple-300' : 'hover:opacity-90'}`}
+                                    className={`shrink-0 flex items-center justify-center rounded-full transition-all active:scale-90 hover:scale-110 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 ${isTeacherMode ? 'ring-2 ring-purple-300' : ''}`}
                                     style={{
                                         width: 36,
                                         height: 36,
                                         background: 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)',
-                                        boxShadow: isTeacherMode ? '0 0 14px rgba(124, 58, 237, 0.65)' : 'none',
+                                        boxShadow: isTeacherMode ? '0 0 14px rgba(124, 58, 237, 0.65)' : '0 2px 8px rgba(124, 58, 237, 0.3)',
                                     }}
-                                    title={isTeacherMode ? 'Stop Interactive AI Teacher' : 'Interactive AI Teacher'}
+                                    title={isTeacherMode ? 'Voice Teaching Mode is ON — click to stop' : 'Interactive AI Teacher'}
                                     aria-label={isTeacherMode ? 'Stop Interactive AI Teacher' : 'Start Interactive AI Teacher'}
                                     aria-pressed={isTeacherMode}
                                 >
@@ -1427,6 +1560,8 @@ export default function TeachingPage() {
                             </div>
                         </div>
                     </motion.div>
+                        )}
+                    </AnimatePresence>
 
                     {/* ═══════════════════════ TEACHING PANEL (Center — 55%) ═══════════════════════ */}
                     <AnimatePresence mode="popLayout">
@@ -1435,8 +1570,8 @@ export default function TeachingPage() {
                                 layout
                                 initial={isMobile ? { opacity: 0 } : { opacity: 0, flex: '0 0 0px' }}
                                 animate={isMobile ? { opacity: mobilePanel === 'teach' ? 1 : 0 } : {
-                                    opacity: rightMaximized ? 0 : 1,
-                                    flex: rightMaximized ? '0 0 0px' : (centerMaximized ? '1 1 100%' : (rightPanelVisible ? '55 55 0%' : '75 75 0%')),
+                                    opacity: (rightMaximized || chatMaximized) ? 0 : 1,
+                                    flex: (rightMaximized || chatMaximized) ? '0 0 0px' : (centerMaximized ? '1 1 100%' : (rightPanelVisible ? '55 55 0%' : '75 75 0%')),
                                     borderRadius: centerMaximized ? 0 : 20,
                                     boxShadow: centerMaximized ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
                                 }}
@@ -1485,6 +1620,7 @@ export default function TeachingPage() {
                                                 } else {
                                                     setCenterMaximized(true);
                                                     setRightMaximized(false);
+                                                    setChatMaximized(false);
                                                 }
                                             }}
                                             className={`rounded-lg transition-colors flex items-center justify-center ${centerMaximized
@@ -1763,7 +1899,7 @@ export default function TeachingPage() {
 
                     {/* Collapsed Panel Expanders (desktop/tablet only) — hidden when Studio is maximized */}
                     <AnimatePresence mode="popLayout">
-                        {!isMobile && !centerPanelVisible && !centerMaximized && !rightMaximized && (
+                        {!isMobile && !centerPanelVisible && !centerMaximized && !rightMaximized && !chatMaximized && (
                             <motion.div
                                 layout
                                 initial={{ opacity: 0, width: 0 }}
@@ -1794,8 +1930,8 @@ export default function TeachingPage() {
                                 layout
                                 initial={isMobile ? { opacity: 0 } : { opacity: 0, flex: '0 0 0px' }}
                                 animate={isMobile ? { opacity: mobilePanel === 'studio' ? 1 : 0 } : { 
-                                    opacity: centerMaximized ? 0 : 1,
-                                    flex: centerMaximized ? '0 0 0px' : (rightMaximized ? '1 1 100%' : (centerPanelVisible ? '22 22 0%' : '75 75 0%')),
+                                    opacity: (centerMaximized || chatMaximized) ? 0 : 1,
+                                    flex: (centerMaximized || chatMaximized) ? '0 0 0px' : (rightMaximized ? '1 1 100%' : (centerPanelVisible ? '22 22 0%' : '75 75 0%')),
                                     borderRadius: rightMaximized ? 0 : 20,
                                     boxShadow: rightMaximized ? 'none' : 'var(--teaching-panel-shadow)',
                                 }}
@@ -1836,6 +1972,7 @@ export default function TeachingPage() {
                                                     } else {
                                                         setRightMaximized(true);
                                                         setCenterMaximized(false);
+                                                        setChatMaximized(false);
                                                     }
                                                 }}
                                                 className={`rounded-lg transition-colors flex items-center justify-center touch-target min-w-[44px] min-h-[44px] ${rightMaximized
@@ -2056,7 +2193,7 @@ export default function TeachingPage() {
 
                     {/* Collapsed Right Panel Expander (desktop/tablet only) — hidden when teaching is maximized */}
                     <AnimatePresence>
-                        {!isMobile && !rightPanelVisible && !rightMaximized && !centerMaximized && (
+                        {!isMobile && !rightPanelVisible && !rightMaximized && !centerMaximized && !chatMaximized && (
                             <motion.div
                                 layout
                                 initial={{ opacity: 0, width: 0 }}

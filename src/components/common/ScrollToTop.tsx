@@ -6,36 +6,21 @@ export default function ScrollToTop() {
 
     useEffect(() => {
         const resetScroll = () => {
-            // Scroll the main window to the top
-            window.scrollTo({
-                top: 0,
-                left: 0,
-                behavior: 'instant'
-            });
-
-            // Target explicit scrollable IDs
-            const mainContent = document.getElementById('main-content');
-            if (mainContent) {
-                mainContent.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-            }
-
-            // Target generic layout scroll containers like dashboards
-            const scrollContainers = document.querySelectorAll('.overflow-y-auto, [style*="overflow-y: auto"], .scroll-optimized, .custom-scrollbar');
-            scrollContainers.forEach(container => {
-                container.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-            });
+            window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+            document.getElementById('main-content')?.scrollTo({ top: 0, left: 0, behavior: 'instant' });
         };
 
-        // Fire immediately for synchronous DOM updates
+        // Immediately for the new route, plus one delayed pass to catch
+        // lazy-loaded (Suspense) content that mounts right after navigation.
         resetScroll();
+        const timeoutId = setTimeout(() => {
+            resetScroll();
+            document
+                .querySelectorAll('.overflow-y-auto, .custom-scrollbar')
+                .forEach(container => container.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
+        }, 150);
 
-        // Fire progressively to catch lazy-loaded (Suspense) elements mounting right after navigation
-        const timeoutIds = [50, 150, 300, 500].map(delay => setTimeout(resetScroll, delay));
-
-        return () => {
-            timeoutIds.forEach(id => clearTimeout(id));
-        };
-
+        return () => clearTimeout(timeoutId);
     }, [pathname]);
 
     return null;

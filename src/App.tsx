@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { AnimatePresence, MotionConfig } from 'framer-motion';
+import { MotionConfig } from 'framer-motion';
 import { useAuthStore } from './stores/authStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useTeachingStore } from './stores/teachingStore';
@@ -32,14 +32,23 @@ const CompetitiveTeachingPage = lazy(() => import('./pages/CompetitiveTeachingPa
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const role = useAuthStore((state) => state.role);
+  const setRole = useAuthStore((state) => state.setRole);
+
+  // Legacy sessions may be authenticated without a role. Repair the state
+  // directly instead of issuing a <Navigate> to the same URL (which rendered
+  // nothing and left a blank screen until a manual refresh).
+  useEffect(() => {
+    if (isAuthenticated && !role) {
+      setRole('student');
+    }
+  }, [isAuthenticated, role, setRole]);
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
-  // If authenticated but no role (legacy session), set default and redirect to student
   if (!role) {
-    return <Navigate to={studentRoutes.dashboard} replace />;
+    return <FullPageLoader message="" />;
   }
 
   return <>{children}</>;
@@ -195,13 +204,15 @@ function DefaultRedirect() {
   return <Navigate to="/login" replace />;
 }
 
-// Animated Routes Component — strict role separation: /student/*, /teacher/*, /admin/*
-function AnimatedRoutes() {
-  const location = useLocation();
-
+// App routes — strict role separation: /student/*, /teacher/*, /admin/*.
+// NOTE: deliberately NOT wrapped in AnimatePresence and NOT keyed by pathname.
+// The previous AnimatePresence mode="wait" + key={pathname} combination forced a
+// full route-tree remount on every navigation and could stall exits entirely,
+// which is what made clicks appear dead until a manual refresh.
+// Page-level enter animations live inside each page via <PageTransition>.
+function AppRoutes() {
   return (
-    <AnimatePresence mode="wait">
-      <Routes location={location} key={location.pathname}>
+    <Routes>
         <Route path="/login" element={<Suspense fallback={<FullPageLoader message="Loading..." />}><LoginPage /></Suspense>} />
 
         {/* Student routes */}
@@ -395,8 +406,7 @@ function AnimatedRoutes() {
 
         <Route path="/" element={<DefaultRedirect />} />
         <Route path="*" element={<DefaultRedirect />} />
-      </Routes>
-    </AnimatePresence>
+    </Routes>
   );
 }
 
@@ -422,7 +432,7 @@ function App() {
           <ScrollToTop />
           <SettingsEffect />
           <HydrationGuard>
-            <AnimatedRoutes />
+            <AppRoutes />
           </HydrationGuard>
           <ToastContainer toasts={toasts} onClose={removeToast} />
         </BrowserRouter>

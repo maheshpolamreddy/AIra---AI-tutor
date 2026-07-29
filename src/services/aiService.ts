@@ -13,7 +13,16 @@ const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY as string | undefined;
 const GROQ_CHAT_MODEL =
     (import.meta.env.VITE_GROQ_MODEL as string | undefined) || 'llama-3.3-70b-versatile';
 const GROQ_VISION_MODEL =
-    (import.meta.env.VITE_GROQ_VISION_MODEL as string | undefined) || 'llama-3.2-11b-vision-preview';
+    (import.meta.env.VITE_GROQ_VISION_MODEL as string | undefined) || 'qwen/qwen3.6-27b';
+const OPENROUTER_VISION_MODEL =
+    (import.meta.env.VITE_OPENROUTER_VISION_MODEL as string | undefined) || 'google/gemini-2.5-flash';
+
+/** Groq vision models to try in order (primary env override first). */
+const GROQ_VISION_MODEL_FALLBACKS = [
+    GROQ_VISION_MODEL,
+    'qwen/qwen3.6-27b',
+    'meta-llama/llama-4-scout-17b-16e-instruct',
+].filter((m, i, arr) => arr.indexOf(m) === i);
 
 const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -54,6 +63,123 @@ export interface GeneratedContent {
 /** Optional settings for `callAI`. Default temperature is 0 (deterministic). */
 export interface CallAIOptions {
     temperature?: number;
+}
+
+export type StreamChunkHandler = (delta: string, full: string) => void;
+
+/** Shared markdown formatting rules for chat-panel teaching responses */
+const TEACHING_FORMAT_RULES = `FORMATTING (required — use clean markdown):
+- Write short paragraphs (2–4 sentences). Never write walls of text.
+- Bold **keywords**, **definitions**, **formulas**, **scientific terms**, and **important concepts**.
+- Use bullet lists (- item) or numbered lists for multiple items — never comma-separated lists.
+- When teaching a concept, structure with bold section labels on their own line:
+  **What is …?**, **How does it work?**, **Example**, **Important Note**, **Key Points**, **Quick Recap**, **Question for You**
+- Put equations on their own line or in a \`\`\`math fenced block (centered formula).
+- End every explanation with exactly one contextual follow-up question under **Question for You**.
+- For programming, use \`\`\`language code blocks with a brief sentence before and after.
+- Use > blockquotes for important notes when helpful.
+- Add blank lines between sections for readability.`;
+
+function stripAssistantPrefix(text: string): string {
+    return text
+        .replace(/^(aɪra:|aira:|ai teacher:|teacher:|ai tutor:|assistant:|tutor:|ai:)\s*/i, '')
+        .trim();
+}
+
+async function progressiveReveal(text: string, onChunk: StreamChunkHandler, chunkMs = 28): Promise<string> {
+    const tokens = text.match(/\S+\s*|\s+/g) ?? [text];
+    let full = '';
+    for (const token of tokens) {
+        full += token;
+        onChunk(token, full);
+        await new Promise(r => setTimeout(r, chunkMs));
+    }
+    return text;
+}
+
+async function streamGroqCompletion(
+    prompt: string,
+    onChunk: StreamChunkHandler,
+    temperature = 0,
+): Promise<string> {
+    if (!GROQ_API_KEY) throw new Error('Groq API key missing');
+
+    const response = await fetch(GROQ_API_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+            model: GROQ_CHAT_MODEL,
+            messages: [{ role: 'user', content: prompt }],
+            temperature,
+            max_tokens: 8192,
+            stream: true,
+        }),
+        signal: AbortSignal.timeout(90000),
+    });
+
+    if (!response.ok) {
+        const errBody = await response.text().catch(() => '');
+        throw new Error(`Groq stream error: ${response.status} ${response.statusText} ${errBody.slice(0, 200)}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Groq stream: no response body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let full = '';
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const payload = trimmed.slice(5).trim();
+            if (!payload || payload === '[DONE]') continue;
+            try {
+                const parsed = JSON.parse(payload) as {
+                    choices?: Array<{ delta?: { content?: string } }>;
+                };
+                const delta = parsed.choices?.[0]?.delta?.content ?? '';
+                if (delta) {
+                    full += delta;
+                    onChunk(delta, full);
+                }
+            } catch {
+                /* skip malformed SSE chunks */
+            }
+        }
+    }
+
+    if (!full.trim()) throw new Error('Empty stream response from Groq');
+    return full;
+}
+
+async function streamWithFallback(
+    prompt: string,
+    onChunk: StreamChunkHandler,
+    temperature: number,
+    fetchFull: (p: string) => Promise<string>,
+): Promise<string> {
+    if (GROQ_API_KEY) {
+        try {
+            return stripAssistantPrefix(await streamGroqCompletion(prompt, onChunk, temperature));
+        } catch (err) {
+            console.warn('[aiService] Groq stream failed, falling back to full fetch:', err);
+        }
+    }
+
+    const full = stripAssistantPrefix(await fetchFull(prompt));
+    await progressiveReveal(full, onChunk);
+    return full;
 }
 
 export const aiService = {
@@ -631,19 +757,87 @@ HOW TO RESPOND:
 - If the question relates to the lesson topic, connect your answer to the step content above when useful.
 - If the question is off-topic, answer it anyway in a clear, helpful way (like a smart tutor who also chats).
 - Use plain language suitable for ${gradeLevel || 'the student’s level'}; define jargon when needed.
-- For multi-part questions, use short paragraphs or numbered steps.
-- If you are unsure, say so briefly and give your best educational guess or suggest how to find out.
 - Be warm and conversational. No lectures unless the question needs depth.
+
+${TEACHING_FORMAT_RULES}
 
 Safety: Do not help with illegal, harmful, or exam-cheating requests (e.g. live exam answers). Everything else is fair game.`;
 
         try {
             const response = await this.callAI(systemPrompt, 3, 1200, { temperature: 0.62 });
-            return response
-                .replace(/^(ai tutor:|assistant:|tutor:|ai:)\s*/i, '')
-                .trim();
+            return stripAssistantPrefix(response);
         } catch {
             return `I couldn’t reach the AI service just now. Please try sending your message again in a moment.`;
+        }
+    },
+
+    /**
+     * Streaming variant of sendChatMessage — Groq SSE when available, progressive reveal otherwise.
+     */
+    async streamChatMessage(
+        params: {
+            userMessage: string;
+            topicName?: string | null;
+            chapterName?: string | null;
+            stepTitle?: string | null;
+            stepContent?: string | null;
+            subjectArea?: string | null;
+            gradeLevel?: string | null;
+            conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+            userProfession?: string | null;
+        },
+        onChunk: StreamChunkHandler,
+    ): Promise<string> {
+        const sanitizedMessage = params.userMessage.substring(0, 4000).replace(/[<>]/g, '').trim();
+        if (!sanitizedMessage) {
+            const fallback = 'Please type a question or message — I’m here to help.';
+            onChunk(fallback, fallback);
+            return fallback;
+        }
+
+        const recentHistory = (params.conversationHistory ?? []).slice(-8)
+            .map(m => `${m.role === 'user' ? 'Student' : 'AI Tutor'}: ${m.content}`)
+            .join('\n');
+
+        const systemPrompt = `You are a capable, friendly AI tutor in a learning app. The student may ask you **anything**: the current lesson, homework, other subjects, how to study, definitions, problems, or everyday questions.
+
+CURRENT LESSON CONTEXT (use when it helps; if the question is not about this lesson, still answer fully — do not refuse or say you only discuss the lesson):
+- Topic: ${params.topicName || 'N/A'}
+- Chapter: ${params.chapterName || 'N/A'}
+- Subject: ${params.subjectArea || 'N/A'}
+- Grade / level: ${params.gradeLevel || 'N/A'}
+- Current step title: ${params.stepTitle || 'N/A'}
+- Step content (for tying answers to what’s on screen): ${params.stepContent ? params.stepContent.substring(0, 1200) : 'N/A'}
+
+${params.userProfession ? `Learner interest: ${params.userProfession} — connect when relevant.` : ''}
+
+RECENT CHAT:
+${recentHistory || '(Start of conversation)'}
+
+STUDENT MESSAGE: "${sanitizedMessage}"
+
+HOW TO RESPOND:
+- Answer the question **directly and completely**. Do not ask the user to clarify unless the message is genuinely empty or impossible to interpret.
+- If the question relates to the lesson topic, connect your answer to the step content above when useful.
+- If the question is off-topic, answer it anyway in a clear, helpful way (like a smart tutor who also chats).
+- Use plain language suitable for ${params.gradeLevel || 'the student’s level'}; define jargon when needed.
+- Be warm and conversational. No lectures unless the question needs depth.
+
+${TEACHING_FORMAT_RULES}
+
+Safety: Do not help with illegal, harmful, or exam-cheating requests (e.g. live exam answers). Everything else is fair game.`;
+
+        try {
+            return await streamWithFallback(
+                systemPrompt,
+                onChunk,
+                0.62,
+                (p) => this.callAI(p, 3, 1200, { temperature: 0.62 }),
+            );
+        } catch {
+            const fallback = `I couldn’t reach the AI service just now. Please try sending your message again in a moment.`;
+            onChunk(fallback, fallback);
+            return fallback;
         }
     },
 
@@ -714,13 +908,12 @@ If the student's message is a NEW question rather than confusion about your last
 HOW TO TEACH:
 - Teach like a real teacher standing next to the student: simple language, logical flow, one concrete example, and a short real-world connection or analogy when it helps.
 - Occasionally (not every time) use a brief encouraging line like "That's a good question" or "Many students find this tricky at first" — vary it, never sound scripted.
-- Keep it focused: roughly 100 to 200 words. No lectures.
-- End with exactly ONE short check-in question, e.g. "Did that clear it up, or should I try another example?"
+- Keep it focused: roughly 100 to 250 words. No lectures.
+- End with exactly ONE short check-in question under **Question for You**.
 
-SPOKEN OUTPUT RULES (your reply is read aloud by text-to-speech):
-- Plain conversational text only. NO markdown, NO asterisks, NO headings, NO bullet symbols, NO emojis.
-- Write numbers and symbols the way a teacher would say them (say "x squared" style phrasing for simple math when possible).
-- Short sentences. Natural pauses come from full stops.
+${TEACHING_FORMAT_RULES}
+
+DISPLAY NOTE: Your reply appears in a rich chat panel AND is read aloud by text-to-speech. Use markdown for structure; keep sentences natural when spoken.
 
 LANGUAGE:
 - Reply in the language the student wrote in. If it's unclear, reply in ${preferredLanguageName}.
@@ -730,11 +923,95 @@ Safety: do not help with live-exam cheating or harmful requests; gently redirect
 
         try {
             const response = await this.callAI(systemPrompt, 3, 1400, { temperature: 0.7 });
-            return response
-                .replace(/^(aɪra:|aira:|ai teacher:|teacher:|ai tutor:|assistant:|ai:)\s*/i, '')
-                .trim();
+            return stripAssistantPrefix(response);
         } catch {
             return 'I couldn’t reach the AI service just now. Please ask your doubt again in a moment — I’m right here.';
+        }
+    },
+
+    /** Streaming variant of answerDoubt */
+    async streamAnswerDoubt(
+        params: {
+            question: string;
+            topicName?: string | null;
+            chapterName?: string | null;
+            stepTitle?: string | null;
+            stepContent?: string;
+            subjectArea?: string | null;
+            gradeLevel?: string | null;
+            conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+            userProfession?: string | null;
+            attemptNumber?: number;
+            preferredLanguageName?: string;
+        },
+        onChunk: StreamChunkHandler,
+    ): Promise<string> {
+        const sanitized = params.question.substring(0, 4000).replace(/[<>]/g, '').trim();
+        if (!sanitized) {
+            const fallback = 'I’m listening! Tell me what’s confusing you, and we’ll work through it together.';
+            onChunk(fallback, fallback);
+            return fallback;
+        }
+
+        const recentHistory = (params.conversationHistory ?? []).slice(-10)
+            .map(m => `${m.role === 'user' ? 'Student' : 'Teacher'}: ${m.content}`)
+            .join('\n');
+
+        const attemptNumber = params.attemptNumber ?? 1;
+        const adaptiveGuidance = attemptNumber <= 1
+            ? 'This is your first explanation of this doubt. Teach it clearly from the ground up.'
+            : attemptNumber === 2
+                ? 'The student did NOT fully understand your previous explanation. Explain it again DIFFERENTLY: simpler words, a slower build-up, and a brand-new everyday example. Do not repeat sentences from your earlier answer.'
+                : 'The student is still confused after two explanations. Change your approach completely: use one vivid real-life analogy, then walk through the idea in tiny numbered steps, checking the logic at each step. Do not reuse earlier wording or examples.';
+
+        const preferredLanguageName = params.preferredLanguageName ?? 'English';
+
+        const systemPrompt = `You are Aɪra, a warm and highly experienced classroom teacher. The lesson is paused because the student raised their hand with a doubt. Your only goal right now is to make THIS student truly understand.
+
+CURRENT LESSON (the doubt most likely relates to this — use it so the student never has to repeat context):
+- Topic: ${params.topicName || 'N/A'}
+- Chapter: ${params.chapterName || 'N/A'}
+- Subject: ${params.subjectArea || 'N/A'}
+- Grade / level: ${params.gradeLevel || 'N/A'}
+- What was being explained when they raised the doubt: ${params.stepTitle || 'N/A'}
+- Board content at that moment: ${params.stepContent ? params.stepContent.substring(0, 1200) : 'N/A'}
+${params.userProfession ? `- Student's field of interest: ${params.userProfession} — connect examples to it when natural.` : ''}
+
+CONVERSATION SO FAR:
+${recentHistory || '(The student just raised their hand.)'}
+
+STUDENT'S MESSAGE: "${sanitized}"
+
+ADAPTIVE TEACHING: ${adaptiveGuidance}
+If the student's message is a NEW question rather than confusion about your last answer, treat it as a fresh doubt and answer it directly.
+
+HOW TO TEACH:
+- Teach like a real teacher standing next to the student: simple language, logical flow, one concrete example, and a short real-world connection or analogy when it helps.
+- Occasionally (not every time) use a brief encouraging line like "That's a good question" or "Many students find this tricky at first" — vary it, never sound scripted.
+- Keep it focused: roughly 100 to 250 words. No lectures.
+- End with exactly ONE short check-in question under **Question for You**.
+
+${TEACHING_FORMAT_RULES}
+
+DISPLAY NOTE: Your reply appears in a rich chat panel AND is read aloud by text-to-speech. Use markdown for structure; keep sentences natural when spoken.
+
+LANGUAGE:
+- Reply in the language the student wrote in. If it's unclear, reply in ${preferredLanguageName}.
+- If the student asks to switch languages, switch immediately and completely, keeping grammar natural.
+
+Safety: do not help with live-exam cheating or harmful requests; gently redirect to learning instead.`;
+
+        try {
+            return await streamWithFallback(
+                systemPrompt,
+                onChunk,
+                0.7,
+                (p) => this.callAI(p, 3, 1400, { temperature: 0.7 }),
+            );
+        } catch {
+            const fallback = 'I couldn’t reach the AI service just now. Please ask your doubt again in a moment — I’m right here.';
+            onChunk(fallback, fallback);
+            return fallback;
         }
     },
 
@@ -769,11 +1046,13 @@ STUDENT QUESTION: "${question}"
 
 Instructions:
 1) Ground your answer ONLY in the document above. If something is not in the document, say clearly: "Your document doesn’t contain that information" and suggest what they could add or ask instead.
-2) Write for a student: short paragraphs, plain English, and numbered or bulleted steps when explaining processes.
+2) Write for a student with clear structure and readable markdown.
 3) For definitions, quote or paraphrase the document’s wording when possible.
 4) If the document is ambiguous, explain what it does say and what is unclear.
 5) If the student asked for a summary, synthesis, or comparison, still stay faithful to the document — do not invent facts.
-6) Reply in clear English only.`;
+6) Reply in clear English only.
+
+${TEACHING_FORMAT_RULES}`;
 
         try {
             const response = await this.callAI(prompt, 3, 1200, { temperature: 0.45 });
@@ -783,7 +1062,62 @@ Instructions:
         }
     },
 
-    /** Vision Q&A via Groq (Llama vision) — OpenAI-compatible messages. */
+    /**
+     * Streaming variant for text document Q&A (vision/image uses full fetch + progressive reveal).
+     */
+    async streamDocumentQuestion(
+        documentContent: string,
+        question: string,
+        onChunk: StreamChunkHandler,
+    ): Promise<string> {
+        const IS_IMAGE = documentContent.startsWith('__IMAGE_BASE64__');
+
+        if (IS_IMAGE) {
+            const base64DataUri = documentContent.replace('__IMAGE_BASE64__', '');
+            const full = await this.answerImageQuestion(base64DataUri, question);
+            await progressiveReveal(full.trim(), onChunk);
+            return full.trim();
+        }
+
+        const MAX_DOC_CHARS = 10000;
+        const truncated = documentContent.length > MAX_DOC_CHARS
+            ? documentContent.slice(0, MAX_DOC_CHARS) + '\n\n[Document truncated for length — only the above text was available.]'
+            : documentContent;
+
+        const prompt = `You are an expert tutor helping a student understand material they uploaded (notes, PDF text, assignment, etc.).
+
+DOCUMENT CONTENT:
+---BEGIN DOCUMENT---
+${truncated}
+---END DOCUMENT---
+
+STUDENT QUESTION: "${question}"
+
+Instructions:
+1) Ground your answer ONLY in the document above. If something is not in the document, say clearly: "Your document doesn’t contain that information" and suggest what they could add or ask instead.
+2) Write for a student with clear structure and readable markdown.
+3) For definitions, quote or paraphrase the document’s wording when possible.
+4) If the document is ambiguous, explain what it does say and what is unclear.
+5) If the student asked for a summary, synthesis, or comparison, still stay faithful to the document — do not invent facts.
+6) Reply in clear English only.
+
+${TEACHING_FORMAT_RULES}`;
+
+        try {
+            return await streamWithFallback(
+                prompt,
+                onChunk,
+                0.45,
+                (p) => this.callAI(p, 3, 1200, { temperature: 0.45 }),
+            );
+        } catch {
+            const fallback = "I wasn't able to process your question right now. Please try again in a moment.";
+            onChunk(fallback, fallback);
+            return fallback;
+        }
+    },
+
+    /** Vision Q&A via Groq — OpenAI-compatible multimodal messages. */
     async fetchGroqVisionAnswer(base64DataUri: string, question: string): Promise<string> {
         if (!GROQ_API_KEY) throw new Error('Groq API key missing');
 
@@ -797,16 +1131,84 @@ Do this in order:
 3) Answer the question step by step. For math/science, show reasoning. For diagrams, explain labels and relationships.
 4) If the image is blurry or unreadable, say what you can infer and what you cannot read.
 5) Use simple language suitable for a student; use bullets or numbered steps when helpful.
-6) Reply only in clear English.`;
+6) Reply only in clear English.
 
-        const response = await fetch(GROQ_API_URL, {
+${TEACHING_FORMAT_RULES}`;
+
+        let lastError: unknown = null;
+
+        for (const model of GROQ_VISION_MODEL_FALLBACKS) {
+            try {
+                const response = await fetch(GROQ_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${GROQ_API_KEY}`,
+                    },
+                    body: JSON.stringify({
+                        model,
+                        messages: [
+                            {
+                                role: 'user',
+                                content: [
+                                    { type: 'image_url', image_url: { url: base64DataUri } },
+                                    { type: 'text', text: tutorPrompt },
+                                ],
+                            },
+                        ],
+                        max_tokens: 3500,
+                        temperature: 0.45,
+                    }),
+                    signal: AbortSignal.timeout(60000),
+                });
+
+                if (!response.ok) {
+                    const errBody = await response.text().catch(() => '');
+                    throw new Error(`Groq vision error (${model}): ${response.status} ${errBody.slice(0, 300)}`);
+                }
+
+                const data = await response.json();
+                if (!data.choices?.[0]?.message) throw new Error(`Invalid Groq vision response (${model})`);
+                const visionText = normalizeApiMessageContent(data.choices[0].message.content).trim();
+                if (!visionText) throw new Error(`Empty Groq vision response (${model})`);
+                return visionText;
+            } catch (err) {
+                lastError = err;
+                console.warn(`[aiService] Groq vision model ${model} failed:`, err);
+            }
+        }
+
+        throw lastError ?? new Error('All Groq vision models failed');
+    },
+
+    /** OpenRouter vision Q&A fallback. */
+    async fetchOpenRouterVisionAnswer(base64DataUri: string, question: string): Promise<string> {
+        if (!OPENROUTER_API_KEY) throw new Error('OpenRouter API key missing');
+
+        const tutorPrompt = `You are a patient tutor. The user uploaded an image (handwritten notes, printed page, diagram, chart, or photo of a problem).
+
+STUDENT QUESTION: "${question}"
+
+Do this in order:
+1) Briefly say what the image shows (e.g. topic, type of diagram, visible headings).
+2) Read any visible text carefully (OCR mentally). Quote short phrases if useful.
+3) Answer the question step by step. For math/science, show reasoning. For diagrams, explain labels and relationships.
+4) If the image is blurry or unreadable, say what you can infer and what you cannot read.
+5) Use simple language suitable for a student; use bullets or numbered steps when helpful.
+6) Reply only in clear English.
+
+${TEACHING_FORMAT_RULES}`;
+
+        const response = await fetch(OPENROUTER_API_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                Authorization: `Bearer ${GROQ_API_KEY}`,
+                'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                'HTTP-Referer': window.location.origin,
+                'X-Title': 'Aira Academy',
             },
             body: JSON.stringify({
-                model: GROQ_VISION_MODEL,
+                model: OPENROUTER_VISION_MODEL,
                 messages: [
                     {
                         role: 'user',
@@ -824,13 +1226,13 @@ Do this in order:
 
         if (!response.ok) {
             const errBody = await response.text().catch(() => '');
-            throw new Error(`Groq vision error: ${response.status} ${errBody.slice(0, 300)}`);
+            throw new Error(`Vision API error (${OPENROUTER_VISION_MODEL}): ${response.status} ${errBody.slice(0, 300)}`);
         }
 
         const data = await response.json();
-        if (!data.choices?.[0]?.message) throw new Error('Invalid Groq vision response');
+        if (!data.choices?.[0]?.message) throw new Error('Invalid vision response');
         const visionText = normalizeApiMessageContent(data.choices[0].message.content).trim();
-        if (!visionText) throw new Error('Empty Groq vision response');
+        if (!visionText) throw new Error('Empty vision response');
         return visionText;
     },
 
@@ -863,57 +1265,7 @@ Do this in order:
         }
 
         try {
-            const response = await fetch(OPENROUTER_API_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-                    'HTTP-Referer': window.location.origin,
-                    'X-Title': 'Aira Academy',
-                },
-                body: JSON.stringify({
-                    model: 'google/gemini-2.0-flash-001',
-                    messages: [
-                        {
-                            role: 'user',
-                            content: [
-                                {
-                                    type: 'image_url',
-                                    image_url: { url: uri },
-                                },
-                                {
-                                    type: 'text',
-                                    text: `You are a patient tutor. The user uploaded an image (handwritten notes, printed page, diagram, chart, or photo of a problem).
-
-STUDENT QUESTION: "${question}"
-
-Do this in order:
-1) Briefly say what the image shows (e.g. topic, type of diagram, visible headings).
-2) Read any visible text carefully (OCR mentally). Quote short phrases if useful.
-3) Answer the question step by step. For math/science, show reasoning. For diagrams, explain labels and relationships.
-4) If the image is blurry or unreadable, say what you can infer and what you cannot read.
-5) Use simple language suitable for a student; use bullets or numbered steps when helpful.
-6) Reply only in clear English.`,
-                                },
-                            ],
-                        },
-                    ],
-                    max_tokens: 3500,
-                }),
-                signal: AbortSignal.timeout(60000),
-            });
-
-            if (!response.ok) {
-                throw new Error(`Vision API error: ${response.status}`);
-            }
-
-            const data = await response.json();
-            if (!data.choices?.[0]?.message) {
-                throw new Error('Invalid vision response');
-            }
-            const visionText = normalizeApiMessageContent(data.choices[0].message.content).trim();
-            if (!visionText) throw new Error('Empty vision response');
-            return visionText;
+            return await this.fetchOpenRouterVisionAnswer(uri, question);
         } catch (err) {
             console.error('[aiService] Image vision failed:', err);
             return `Image analysis failed: ${err instanceof Error ? err.message : 'Unknown error'}. Please ensure your image is clear and try again.`;
@@ -952,7 +1304,7 @@ Rules:
                     'X-Title': 'Aira Academy',
                 },
                 body: JSON.stringify({
-                    model: 'google/gemini-2.0-flash-001',
+                    model: OPENROUTER_VISION_MODEL,
                     messages: [
                         {
                             role: 'user',

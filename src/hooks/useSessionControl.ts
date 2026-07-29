@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { useTeachingStore } from '../stores/teachingStore';
@@ -42,23 +42,12 @@ export function useSessionControl(topicId: string | undefined) {
 
     const [topicUnavailable, setTopicUnavailable] = useState(false);
     const [isPreloading, setIsPreloading] = useState(false);
-    const timeoutRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
-
-    useEffect(() => {
-        return () => {
-            // Latest timeout ids at unmount (not a render-cycle ref to a DOM node)
-            // eslint-disable-next-line react-hooks/exhaustive-deps
-            const ids = timeoutRefs.current;
-            ids.forEach(clearTimeout);
-        };
-    }, []);
 
     useEffect(() => {
         const init = async () => {
             if (!topicId) {
                 toast.warning('No topic selected. Redirecting to dashboard...');
-                const redirectTimeoutId = setTimeout(() => navigate(studentRoutes.dashboard), 2000);
-                timeoutRefs.current.push(redirectTimeoutId);
+                navigate(studentRoutes.dashboard, { replace: true });
                 return;
             }
 

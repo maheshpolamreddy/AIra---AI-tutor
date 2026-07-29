@@ -701,6 +701,20 @@ function AuthForm({ role, onBack, theme }: { role: 'student' | 'teacher' | 'admi
 export default function LoginPage() {
   const [selectedRole, setSelectedRole] = useState<'student' | 'teacher' | 'admin' | null>(null);
   const [mascotEmotion, setMascotEmotion] = useState<'happy' | 'excited' | 'laughing' | 'teacher' | 'cool'>('happy');
+  const navigate = useNavigate();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const authRole = useAuthStore((state) => state.role);
+
+  // Already signed in? Go straight to the role home instead of showing a stale login screen.
+  useEffect(() => {
+    if (!isAuthenticated || !authRole) return;
+    const home = authRole === 'teacher'
+      ? teacherRoutes.dashboard
+      : authRole === 'admin'
+        ? adminRoutes.dashboard
+        : studentRoutes.modeSelection;
+    navigate(home, { replace: true });
+  }, [isAuthenticated, authRole, navigate]);
 
   const handleRoleSelect = (role: 'student' | 'teacher' | 'admin') => {
     setSelectedRole(role);
