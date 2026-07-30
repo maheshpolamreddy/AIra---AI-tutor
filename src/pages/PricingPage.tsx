@@ -14,7 +14,7 @@ export default function PricingPage() {
       <header className="px-6 sm:px-10 py-6 border-b border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <Link to="/" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 dark:text-slate-400 hover:text-indigo-600 transition-colors"><ArrowLeft className="w-4 h-4" /> Back to home</Link>
-          <Link to="/login" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition-colors">Sign In <ArrowRight className="w-4 h-4" /></Link>
+          <Link to="/" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition-colors">Get started <ArrowRight className="w-4 h-4" /></Link>
         </div>
       </header>
       <main className="flex-1 px-6 sm:px-10 py-16 sm:py-24">
@@ -31,7 +31,7 @@ export default function PricingPage() {
                 <div className="mb-4">{plan.price === 'Custom' ? <span className="text-3xl font-black text-slate-900 dark:text-white">{plan.price}</span> : <><span className="text-3xl font-black text-slate-900 dark:text-white">₹{plan.price}</span><span className="text-sm text-slate-500 ml-1">/{plan.period}</span></>}</div>
                 <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 leading-relaxed">{plan.description}</p>
                 <ul className="space-y-3 mb-8 flex-1">{plan.features.map((f) => (<li key={f} className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300"><Check className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" strokeWidth={2.5} />{f}</li>))}</ul>
-                <Link to={plan.name === 'School' ? 'mailto:sales@aira.app' : '/login'} className={`block text-center py-3 rounded-xl font-bold transition-colors ${plan.highlighted ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{plan.cta}</Link>
+                <Link to={plan.name === 'School' ? 'mailto:sales@aira.app' : '/'} className={`block text-center py-3 rounded-xl font-bold transition-colors ${plan.highlighted ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{plan.cta}</Link>
               </div>
             ))}
           </div>

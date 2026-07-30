@@ -61,7 +61,7 @@ src/
 
 | Page | Description |
 |------|-------------|
-| `/login` | Authentication (Demo, Guest, OAuth) |
+| `/` | Role selection (Student / Teacher / Admin) |
 | `/onboarding` | Profession selection |
 | `/dashboard` | Learning hub with analytics |
 | `/learn/:topic` | Teaching interface |

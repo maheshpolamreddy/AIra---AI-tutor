@@ -80,15 +80,15 @@ export default function DashboardPage() {
     const handleLogout = () => {
         logout();
         toast.success('Security protocol active. Logged out.');
-        navigate('/login');
+        navigate('/');
     };
 
     const handleSwitchRole = () => {
         toast.info('Switching mission profile...');
-        // Must clear the session first — navigating to /login while still
+        // Must clear the session first — navigating home while still
         // authenticated leaves a stale session and bounces back via redirects.
         logout();
-        navigate('/login');
+        navigate('/');
     };
 
     const handleStartTopic = (topicId: string) => {

@@ -24,7 +24,12 @@ export default function TeacherDashboardPage() {
   const handleLogout = () => {
     logout();
     toast.success('Logged out successfully');
-    navigate('/login');
+    navigate('/');
+  };
+
+  const handleSwitchRole = () => {
+    logout();
+    navigate('/');
   };
 
   const weakTopics = MOCK_CLASS_PERFORMANCE.filter(t => t.score < 60);
@@ -93,7 +98,7 @@ export default function TeacherDashboardPage() {
                 whileHover={{ scale: 1.1, rotate: 180 }}
                 whileTap={{ scale: 0.9 }}
                 type="button"
-                onClick={() => navigate('/login')}
+                onClick={handleSwitchRole}
                 className="p-2 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-xl transition-colors relative group"
                 title="Switch Role"
               >

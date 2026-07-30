@@ -18,7 +18,7 @@ function LandingNav() {
         <Link to="/#how-it-works" className="text-sm font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 transition-colors">How It Works</Link>
         <Link to="/pricing" className="text-sm font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 transition-colors">Pricing</Link>
       </nav>
-      <Link to="/login" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition-colors shadow-md shadow-indigo-200 dark:shadow-none">Sign In <ArrowRight className="w-4 h-4" /></Link>
+      <Link to="/" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition-colors shadow-md shadow-indigo-200 dark:shadow-none">Get started <ArrowRight className="w-4 h-4" /></Link>
     </header>
   );
 }
@@ -40,7 +40,7 @@ export default function LandingPage() {
             <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black text-slate-900 dark:text-white tracking-tighter leading-[0.95] mb-6">Learn smarter with <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-500">Aɪra</span></h1>
             <p className="text-lg sm:text-xl text-slate-600 dark:text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">Interactive teaching, competitive exam prep, and professional courses — all in one intelligent platform built for schools and learners.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link to="/login" className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black transition-colors shadow-xl shadow-indigo-200 dark:shadow-none">Get started free <ArrowRight className="w-5 h-5" /></Link>
+              <Link to="/" className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black transition-colors shadow-xl shadow-indigo-200 dark:shadow-none">Get started free <ArrowRight className="w-5 h-5" /></Link>
               <Link to="/#how-it-works" className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold hover:bg-white dark:hover:bg-slate-800 transition-colors">See how it works</Link>
             </div>
           </motion.div>

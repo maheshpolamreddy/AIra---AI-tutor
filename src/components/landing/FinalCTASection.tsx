@@ -12,7 +12,7 @@ export default function FinalCTASection() {
           <div className="relative z-10">
             <h2 className="text-3xl sm:text-5xl font-black text-white tracking-tighter mb-4">Start learning smarter today</h2>
             <p className="text-indigo-200/90 text-base sm:text-lg max-w-xl mx-auto mb-10 leading-relaxed">Join thousands of students and educators using Aɪra for curriculum mastery and competitive exam prep.</p>
-            <Link to="/login" className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-white text-indigo-900 font-black text-sm sm:text-base hover:bg-indigo-50 transition-colors shadow-lg shadow-black/20">
+            <Link to="/" className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-white text-indigo-900 font-black text-sm sm:text-base hover:bg-indigo-50 transition-colors shadow-lg shadow-black/20">
               Get started free <ArrowRight className="w-5 h-5" />
             </Link>
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-8">

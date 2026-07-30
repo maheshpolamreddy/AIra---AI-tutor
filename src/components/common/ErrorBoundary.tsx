@@ -21,7 +21,7 @@ function ErrorFallback({ error, onRetry }: { error: Error | null; onRetry: () =>
     const routes = getRoutesForRole(role);
 
     const handleGoHome = () => {
-        window.location.href = role ? routes.dashboard : '/login';
+        window.location.href = role ? routes.dashboard : '/';
     };
 
     return (

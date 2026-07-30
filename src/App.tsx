@@ -15,7 +15,7 @@ import ScrollToTop from './components/common/ScrollToTop';
 import { unlockAudioContext } from './hooks/useSpeech';
 
 // Lazy load pages for better performance (code-splitting)
-const LoginPage = lazy(() => import('./pages/LoginPage'));
+const RoleSelectPage = lazy(() => import('./pages/RoleSelectPage'));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage'));
 const TeachingPage = lazy(() => import('./pages/TeachingPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
@@ -44,7 +44,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }, [isAuthenticated, role, setRole]);
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/" replace />;
   }
 
   if (!role) {
@@ -199,9 +199,9 @@ function HydrationGuard({ children }: { children: React.ReactNode }) {
 }
 
 
-// Default redirect: always show the login/landing page by default
+// Default redirect: role select (or bounce home if already signed in)
 function DefaultRedirect() {
-  return <Navigate to="/login" replace />;
+  return <Navigate to="/" replace />;
 }
 
 // App routes — strict role separation: /student/*, /teacher/*, /admin/*.
@@ -213,7 +213,16 @@ function DefaultRedirect() {
 function AppRoutes() {
   return (
     <Routes>
-        <Route path="/login" element={<Suspense fallback={<FullPageLoader message="Loading..." />}><LoginPage /></Suspense>} />
+        <Route
+          path="/"
+          element={
+            <Suspense fallback={<FullPageLoader message="Loading..." />}>
+              <RoleSelectPage />
+            </Suspense>
+          }
+        />
+        {/* Legacy bookmark: login page removed */}
+        <Route path="/login" element={<Navigate to="/" replace />} />
 
         {/* Student routes */}
         <Route path="/student" element={<Navigate to={studentRoutes.modeSelection} replace />} />
@@ -404,7 +413,6 @@ function AppRoutes() {
           }
         />
 
-        <Route path="/" element={<DefaultRedirect />} />
         <Route path="*" element={<DefaultRedirect />} />
     </Routes>
   );
