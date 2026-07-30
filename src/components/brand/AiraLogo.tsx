@@ -14,7 +14,7 @@ interface AiraLogoProps {
  * Mark sits without a backing container; keep clear space around it.
  */
 export default function AiraLogo({
-  markSrc = '/aira-mark.png',
+  markSrc = '/tutor-media/aira-mark.png',
   height = 38,
   showWordmark = true,
   className = '',

@@ -15,6 +15,7 @@ import PageTransition from '../components/common/PageTransition';
 import Breadcrumbs from '../components/common/Breadcrumbs';
 import { toast } from '../stores/toastStore';
 import { getRoutesForRole, studentRoutes } from '../utils/routes';
+import { redirectToLandingLogin } from '../lib/authSession';
 import ExamAnalyticsCard from '../components/dashboard/ExamAnalyticsCard';
 import { AɪraMascot, AchievementStar } from '../components/dashboard/DashboardVisuals';
 import { schoolGrades } from '../data/schoolCurriculum';
@@ -77,18 +78,20 @@ export default function DashboardPage() {
         return base.slice(0, 12);
     }, [activeCategory, searchQuery, allSchoolTopics]);
 
-    const handleLogout = () => {
-        logout();
+    const handleLogout = async () => {
+        await logout();
         toast.success('Security protocol active. Logged out.');
-        navigate('/');
+        redirectToLandingLogin('/student/mode-selection');
     };
 
-    const handleSwitchRole = () => {
+    const handleSwitchRole = async () => {
         toast.info('Switching mission profile...');
-        // Must clear the session first — navigating home while still
-        // authenticated leaves a stale session and bounces back via redirects.
-        logout();
-        navigate('/');
+        if (import.meta.env.DEV) {
+            navigate('/dev/demo-roles');
+            return;
+        }
+        await logout();
+        redirectToLandingLogin('/student/mode-selection');
     };
 
     const handleStartTopic = (topicId: string) => {

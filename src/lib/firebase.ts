@@ -1,22 +1,36 @@
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-import { getAuth } from "firebase/auth";
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAnalytics } from 'firebase/analytics';
+import { getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
 
-// Prefer VITE_FIREBASE_* from .env / Vercel. Defaults below keep the app runnable if env is unset
-// (restrict the web API key to your domains in Firebase Console).
+/**
+ * Shared Firebase project with the AIra landing page (aira-landingpage).
+ * Prefer VITE_FIREBASE_* from env / Vercel; defaults match landing NEXT_PUBLIC_* config.
+ * Retires the old project-aira-2d7f3 defaults.
+ */
 const firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? "AIzaSyBcThGAGiomOjVEkiaCHb71iMuwPE9ZvZc",
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ?? "project-aira-2d7f3.firebaseapp.com",
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID ?? "project-aira-2d7f3",
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ?? "project-aira-2d7f3.firebasestorage.app",
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "260240327920",
-    appId: import.meta.env.VITE_FIREBASE_APP_ID ?? "1:260240327920:web:2f4a6109c56ed761bb2e35",
-    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID ?? "G-G996JQV3PT",
+    apiKey:
+        import.meta.env.VITE_FIREBASE_API_KEY ??
+        'AIzaSyC9L2gJBJI_C0kCy2zVxMfiZqIGEjd-w1o',
+    authDomain:
+        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ??
+        'aira-landingpage.firebaseapp.com',
+    projectId:
+        import.meta.env.VITE_FIREBASE_PROJECT_ID ?? 'aira-landingpage',
+    storageBucket:
+        import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ??
+        'aira-landingpage.firebasestorage.app',
+    messagingSenderId:
+        import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? '993289285952',
+    appId:
+        import.meta.env.VITE_FIREBASE_APP_ID ??
+        '1:993289285952:web:5c5751a02c1fc3c173caa5',
+    measurementId:
+        import.meta.env.VITE_FIREBASE_MEASUREMENT_ID ?? 'G-9FT49STZ0P',
 };
 
-const app = initializeApp(firebaseConfig);
-// Only initialize Analytics in production. On http://localhost (vite preview) or strict embeds,
-// getAnalytics can throw and would blank the whole app — never fail boot for analytics.
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+
 let analytics: ReturnType<typeof getAnalytics> | null = null;
 if (import.meta.env.PROD) {
     try {
@@ -26,6 +40,8 @@ if (import.meta.env.PROD) {
         else console.warn('[firebase] Analytics init skipped');
     }
 }
-const auth = getAuth(app);
 
-export { app, analytics, auth };
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+export { app, analytics, auth, db, firebaseConfig };

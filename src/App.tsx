@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { MotionConfig } from 'framer-motion';
+import { onAuthStateChanged } from 'firebase/auth';
 import { useAuthStore } from './stores/authStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useTeachingStore } from './stores/teachingStore';
@@ -13,9 +14,10 @@ import { getRoleFromPath, studentRoutes, teacherRoutes, adminRoutes } from './ut
 import type { AppRole } from './types';
 import ScrollToTop from './components/common/ScrollToTop';
 import { unlockAudioContext } from './hooks/useSpeech';
+import { auth } from './lib/firebase';
+import { homeForRole, redirectToLandingLogin } from './lib/authSession';
 
-// Lazy load pages for better performance (code-splitting)
-const RoleSelectPage = lazy(() => import('./pages/RoleSelectPage'));
+const DemoRolesPage = lazy(() => import('./pages/DemoRolesPage'));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage'));
 const TeachingPage = lazy(() => import('./pages/TeachingPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
@@ -28,23 +30,45 @@ const TeacherDashboardPage = lazy(() => import('./pages/TeacherDashboardPage'));
 const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage'));
 const CompetitiveTeachingPage = lazy(() => import('./pages/CompetitiveTeachingPage'));
 
-// Protected route wrapper: requires authentication
+/** Sync Firebase Auth (shared with landing) into the tutor Zustand store. */
+function FirebaseAuthBridge() {
+  const applyFirebaseUser = useAuthStore((s) => s.applyFirebaseUser);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (fbUser) => {
+      void applyFirebaseUser(fbUser);
+    });
+    return unsub;
+  }, [applyFirebaseUser]);
+
+  return null;
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const authReady = useAuthStore((state) => state.authReady);
   const role = useAuthStore((state) => state.role);
   const setRole = useAuthStore((state) => state.setRole);
+  const location = useLocation();
 
-  // Legacy sessions may be authenticated without a role. Repair the state
-  // directly instead of issuing a <Navigate> to the same URL (which rendered
-  // nothing and left a blank screen until a manual refresh).
   useEffect(() => {
     if (isAuthenticated && !role) {
       setRole('student');
     }
   }, [isAuthenticated, role, setRole]);
 
+  useEffect(() => {
+    if (!authReady || isAuthenticated) return;
+    const returnPath = `${location.pathname}${location.search}`;
+    redirectToLandingLogin(returnPath);
+  }, [authReady, isAuthenticated, location.pathname, location.search]);
+
+  if (!authReady) {
+    return <FullPageLoader message="" />;
+  }
+
   if (!isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <FullPageLoader message="Redirecting to sign in…" />;
   }
 
   if (!role) {
@@ -54,21 +78,39 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// Role guard: ensures user's role matches the route prefix (/student, /teacher, /admin)
 function RoleGuard({ allowedRole, children }: { allowedRole: AppRole; children: React.ReactNode }) {
   const role = useAuthStore((state) => state.role);
   const location = useLocation();
   const pathRole = getRoleFromPath(location.pathname);
 
   if (role !== allowedRole || pathRole !== allowedRole) {
-    const home = role === 'student' ? studentRoutes.modeSelection : role === 'teacher' ? teacherRoutes.dashboard : adminRoutes.dashboard;
-    return <Navigate to={home} replace />;
+    return <Navigate to={homeForRole(role)} replace />;
   }
 
   return <>{children}</>;
 }
 
-// Settings effect hook to apply settings globally
+/** Demo role switcher — only in DEV or for authenticated admins. */
+function DemoRolesGate({ children }: { children: React.ReactNode }) {
+  const authReady = useAuthStore((s) => s.authReady);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const role = useAuthStore((s) => s.role);
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!authReady) return;
+    const allowed = import.meta.env.DEV || (isAuthenticated && role === 'admin');
+    if (!allowed) {
+      redirectToLandingLogin(`${location.pathname}${location.search}`);
+    }
+  }, [authReady, isAuthenticated, role, location.pathname, location.search]);
+
+  if (!authReady) return <FullPageLoader message="" />;
+  const allowed = import.meta.env.DEV || (isAuthenticated && role === 'admin');
+  if (!allowed) return <FullPageLoader message="Redirecting…" />;
+  return <>{children}</>;
+}
+
 function SettingsEffect() {
   const settings = useSettingsStore((state) => state.settings);
   const setTeachingSpeaking = useTeachingStore((state) => state.setSpeaking);
@@ -77,7 +119,6 @@ function SettingsEffect() {
     const html = document.documentElement;
     const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 
-    // Apply theme
     if (settings.theme === 'dark') {
       html.classList.add('dark');
       html.setAttribute('data-theme', 'dark');
@@ -87,7 +128,6 @@ function SettingsEffect() {
       html.setAttribute('data-theme', 'light');
       themeColorMeta?.setAttribute('content', '#a855f7');
     } else {
-      // System theme
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       if (prefersDark) {
         html.classList.add('dark');
@@ -99,7 +139,6 @@ function SettingsEffect() {
         themeColorMeta?.setAttribute('content', '#a855f7');
       }
 
-      // Listen for system theme changes
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
       const handleChange = (e: MediaQueryListEvent) => {
         if (e.matches) {
@@ -118,38 +157,34 @@ function SettingsEffect() {
   }, [settings.theme]);
 
   useEffect(() => {
-    // Apply font size
-    const html = document.documentElement;
-    html.setAttribute('data-font-size', settings.accessibility.fontSize);
+    document.documentElement.setAttribute('data-font-size', settings.accessibility.fontSize);
   }, [settings.accessibility.fontSize]);
 
   useEffect(() => {
-    // Apply high contrast
-    const html = document.documentElement;
-    html.setAttribute('data-high-contrast', settings.accessibility.highContrast ? 'true' : 'false');
+    document.documentElement.setAttribute(
+      'data-high-contrast',
+      settings.accessibility.highContrast ? 'true' : 'false',
+    );
   }, [settings.accessibility.highContrast]);
 
   useEffect(() => {
-    // Apply reduce animations
-    const html = document.documentElement;
-    html.setAttribute('data-reduce-animations', settings.accessibility.reduceAnimations ? 'true' : 'false');
+    document.documentElement.setAttribute(
+      'data-reduce-animations',
+      settings.accessibility.reduceAnimations ? 'true' : 'false',
+    );
   }, [settings.accessibility.reduceAnimations]);
 
   useEffect(() => {
-    // Apply language
     document.documentElement.lang = settings.language;
     changeLanguage(settings.language);
   }, [settings.language]);
 
   useEffect(() => {
-    // Broadcast preference updates so decoupled components/services can react instantly
     window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: settings }));
   }, [settings]);
 
   useEffect(() => {
-    // Instantly apply TTS enable/disable across the app
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
-
     if (!settings.accessibility.textToSpeech) {
       try {
         window.speechSynthesis.cancel();
@@ -160,7 +195,6 @@ function SettingsEffect() {
     }
   }, [settings.accessibility.textToSpeech, setTeachingSpeaking]);
 
-  // Global audio unlock on first user interaction (required by iOS/Android)
   useEffect(() => {
     const handleFirstInteraction = () => {
       unlockAudioContext();
@@ -181,7 +215,6 @@ function SettingsEffect() {
   return null;
 }
 
-// Hydration guard: ensures the authStore has fully rehydrated from localStorage before rendering routes
 function HydrationGuard({ children }: { children: React.ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
 
@@ -198,31 +231,43 @@ function HydrationGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function RootRedirect() {
+  const authReady = useAuthStore((s) => s.authReady);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const role = useAuthStore((s) => s.role);
 
-// Default redirect: role select (or bounce home if already signed in)
-function DefaultRedirect() {
-  return <Navigate to="/" replace />;
+  useEffect(() => {
+    if (!authReady) return;
+    if (!isAuthenticated) {
+      redirectToLandingLogin('/student/mode-selection');
+    }
+  }, [authReady, isAuthenticated]);
+
+  if (!authReady) return <FullPageLoader message="" />;
+  if (!isAuthenticated) return <FullPageLoader message="Redirecting to sign in…" />;
+  return <Navigate to={homeForRole(role)} replace />;
 }
 
-// App routes — strict role separation: /student/*, /teacher/*, /admin/*.
-// NOTE: deliberately NOT wrapped in AnimatePresence and NOT keyed by pathname.
-// The previous AnimatePresence mode="wait" + key={pathname} combination forced a
-// full route-tree remount on every navigation and could stall exits entirely,
-// which is what made clicks appear dead until a manual refresh.
-// Page-level enter animations live inside each page via <PageTransition>.
 function AppRoutes() {
   return (
     <Routes>
+        <Route path="/" element={<RootRedirect />} />
+        {/* Legacy: send old /login bookmarks to the landing login */}
         <Route
-          path="/"
+          path="/login"
+          element={<LoginRedirect />}
+        />
+
+        <Route
+          path="/dev/demo-roles"
           element={
             <Suspense fallback={<FullPageLoader message="Loading..." />}>
-              <RoleSelectPage />
+              <DemoRolesGate>
+                <DemoRolesPage />
+              </DemoRolesGate>
             </Suspense>
           }
         />
-        {/* Legacy bookmark: login page removed */}
-        <Route path="/login" element={<Navigate to="/" replace />} />
 
         {/* Student routes */}
         <Route path="/student" element={<Navigate to={studentRoutes.modeSelection} replace />} />
@@ -413,9 +458,16 @@ function AppRoutes() {
           }
         />
 
-        <Route path="*" element={<DefaultRedirect />} />
+        <Route path="*" element={<RootRedirect />} />
     </Routes>
   );
+}
+
+function LoginRedirect() {
+  useEffect(() => {
+    redirectToLandingLogin('/student/mode-selection');
+  }, []);
+  return <FullPageLoader message="Redirecting to sign in…" />;
 }
 
 function App() {
@@ -423,10 +475,8 @@ function App() {
   const reduceAnimations = useSettingsStore((state) => state.settings.accessibility.reduceAnimations);
 
   useEffect(() => {
-    // Global TTS Engine Warm-up: Pre-initialize voices to avoid cold-start latency
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.getVoices();
-      // On some browsers, we need to listen for the voices changed event
       const warmup = () => window.speechSynthesis.getVoices();
       window.speechSynthesis.addEventListener('voiceschanged', warmup);
       return () => window.speechSynthesis.removeEventListener('voiceschanged', warmup);
@@ -440,6 +490,7 @@ function App() {
           <ScrollToTop />
           <SettingsEffect />
           <HydrationGuard>
+            <FirebaseAuthBridge />
             <AppRoutes />
           </HydrationGuard>
           <ToastContainer toasts={toasts} onClose={removeToast} />

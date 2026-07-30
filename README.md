@@ -61,7 +61,9 @@ src/
 
 | Page | Description |
 |------|-------------|
-| `/` | Role selection (Student / Teacher / Admin) |
+| `/` | Redirects to landing `/login` or role home |
+| `/login` | Redirects to landing login (canonical) |
+| `/dev/demo-roles` | Dev/admin demo role switcher |
 | `/onboarding` | Profession selection |
 | `/dashboard` | Learning hub with analytics |
 | `/learn/:topic` | Teaching interface |

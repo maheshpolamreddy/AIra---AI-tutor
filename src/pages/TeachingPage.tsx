@@ -61,7 +61,6 @@ import { studentRoutes } from '../utils/routes';
 const SettingsPage = lazy(() => import('./SettingsPage'));
 const ProfilePage = lazy(() => import('./ProfilePage'));
 import { aiService } from '../services/aiService';
-import { extractTextFromFile } from '../utils/documentParser';
 import ChatMessageBubble, { ChatThinkingIndicator } from '../components/teaching/ChatMessageBubble';
 import { normalizeChatContent } from '../utils/chatFormat';
 const DiagramCanvas = lazy(() => import('../components/teaching/DiagramCanvas'));
@@ -72,6 +71,10 @@ import { GREEN_BOARD_FADE_DURATION_MS, subscribeToVisualMarkers } from '../utils
 import { getFirstActiveDiagramId, getVisualsForTopic, parseDiagramMarkerKey } from '../data/visualRegistry';
 import { isImageLikeFile } from '../utils/imageVision';
 
+async function extractUploadedText(file: File): Promise<string> {
+    const { extractTextFromFile } = await import('../utils/documentParser');
+    return extractTextFromFile(file);
+}
 
 export default function TeachingPage() {
     const { topicId } = useParams();
@@ -1438,7 +1441,7 @@ export default function TeachingPage() {
                                                 try {
                                                     setUploadedChatFiles(prev => [...prev, { name: file.name, type: file.type }]);
 
-                                                    const extractedText = await extractTextFromFile(file);
+                                                    const extractedText = await extractUploadedText(file);
                                                     const text =
                                                         extractedText.trim().length > 0
                                                             ? extractedText

@@ -458,22 +458,33 @@ export default function StudentModeSelectionPage({
             <nav className="flex flex-wrap justify-center gap-x-8 gap-y-3" aria-label="Footer">
               {(
                 [
-                  { label: 'Curriculum', to: studentRoutes.curriculum },
-                  { label: 'Competitive', to: studentRoutes.competitive },
-                  { label: 'Privacy', to: '/privacy' },
-                  { label: 'Terms', to: '/terms' },
-                  { label: 'Support', to: '/about' },
+                  { label: 'Curriculum', to: studentRoutes.curriculum, external: false },
+                  { label: 'Competitive', to: studentRoutes.competitive, external: false },
+                  { label: 'Privacy', to: `${import.meta.env.VITE_LANDING_ORIGIN || ''}/privacy`, external: true },
+                  { label: 'Terms', to: `${import.meta.env.VITE_LANDING_ORIGIN || ''}/terms`, external: true },
+                  { label: 'Support', to: `${import.meta.env.VITE_LANDING_ORIGIN || ''}/about`, external: true },
                 ] as const
-              ).map((link) => (
-                <Link
-                  key={link.label}
-                  to={link.to}
-                  className="group relative text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
-                >
-                  {link.label}
-                  <span className="absolute -bottom-0.5 left-0 h-px w-0 bg-current transition-all duration-150 group-hover:w-full" aria-hidden />
-                </Link>
-              ))}
+              ).map((link) =>
+                link.external ? (
+                  <a
+                    key={link.label}
+                    href={link.to}
+                    className="group relative text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
+                  >
+                    {link.label}
+                    <span className="absolute -bottom-0.5 left-0 h-px w-0 bg-current transition-all duration-150 group-hover:w-full" aria-hidden />
+                  </a>
+                ) : (
+                  <Link
+                    key={link.label}
+                    to={link.to}
+                    className="group relative text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
+                  >
+                    {link.label}
+                    <span className="absolute -bottom-0.5 left-0 h-px w-0 bg-current transition-all duration-150 group-hover:w-full" aria-hidden />
+                  </Link>
+                ),
+              )}
             </nav>
 
             <p className="text-center md:text-right text-xs font-medium text-slate-500 dark:text-slate-400">

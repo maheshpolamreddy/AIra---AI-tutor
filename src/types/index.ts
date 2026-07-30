@@ -220,7 +220,7 @@ export type DiagramPurpose = 'Structure' | 'Process' | 'Comparison' | 'Equation'
 
 /**
  * A single diagram within a concept.
- * svg_path: path relative to public/diagrams/ e.g. "atomic_theory/atom_bohr.svg"
+ * svg_path: path relative to public/tutor-media/diagrams/ e.g. "atomic_theory/atom_bohr.svg"
  */
 export interface ConceptDiagram {
     /** Unique within the concept: e.g. 'dalton', 'bohr', 'overview' */
@@ -229,7 +229,7 @@ export interface ConceptDiagram {
     title: string;
     /** Subject-locked diagram type */
     diagram_type?: DiagramType;
-    /** Path relative to public/diagrams/ — the SVG file to render (new engine) */
+    /** Path relative to public/tutor-media/diagrams/ — the SVG file to render (new engine) */
     svg_path?: string;
     /** Legacy: React component key (deprecated — use svg_path) */
     component_key?: string;

@@ -55,42 +55,42 @@ const SUBJECT_IMAGES: Record<string, string> = {
 
     // ─── GRADE 6 ──────────────────────────────────────────────────────────────
     'g6_english':         'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&q=90&w=800', // books on a table
-    'g6_hindi':           '/images/subjects/hindi-g6.png',
+    'g6_hindi':           '/tutor-media/images/subjects/hindi-g6.png',
     'g6_mathematics':     'https://images.unsplash.com/photo-1596495578065-6e0763fa1178?auto=format&fit=crop&q=90&w=800', // calculator and numbers
     'g6_science':         'https://images.unsplash.com/photo-1530026405186-ed1f139313f8?auto=format&fit=crop&q=90&w=800', // beakers/chemicals
-    'g6_social-science':  '/images/subjects/social-science-g6.png',
+    'g6_social-science':  '/tutor-media/images/subjects/social-science-g6.png',
     'g6_computer':        'https://images.unsplash.com/photo-1587620962725-abab7fe55159?auto=format&fit=crop&q=90&w=800', // laptop screen code
 
     // ─── GRADE 7 ──────────────────────────────────────────────────────────────
     'g7_english':         'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&q=90&w=800', // open book
-    'g7_hindi':           '/images/subjects/hindi-g7.png',
+    'g7_hindi':           '/tutor-media/images/subjects/hindi-g7.png',
     'g7_mathematics':     'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?auto=format&fit=crop&q=90&w=800', // geometry / graphs
     'g7_science':         'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&q=90&w=800', // test tubes
-    'g7_social-science':  '/images/subjects/social-science-g7.png',
+    'g7_social-science':  '/tutor-media/images/subjects/social-science-g7.png',
     'g7_computer':        'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&q=90&w=800', // programming setup
 
     // ─── GRADE 8 ──────────────────────────────────────────────────────────────
     'g8_english':         'https://images.unsplash.com/photo-1495446815901-a7297e633e8d?auto=format&fit=crop&q=90&w=800', // literature / glasses
-    'g8_hindi':           '/images/subjects/hindi-g8.png',
+    'g8_hindi':           '/tutor-media/images/subjects/hindi-g8.png',
     'g8_mathematics':     'https://images.unsplash.com/photo-1509228468518-180dd4864904?auto=format&fit=crop&q=90&w=800', // abacus / numbers
     'g8_science':         'https://images.unsplash.com/photo-1554475900-0a0350e3fc7b?auto=format&fit=crop&q=90&w=800', // lab setting
-    'g8_social-science':  '/images/subjects/social-science-g8.png',
+    'g8_social-science':  '/tutor-media/images/subjects/social-science-g8.png',
     'g8_computer':        'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&q=90&w=800', // code on screen
 
     // ─── GRADE 9 ──────────────────────────────────────────────────────────────
     'g9_english':         'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=90&w=800', // elegant vintage books
-    'g9_hindi':           '/images/subjects/hindi-g9.png',
-    'g9_mathematics':     '/images/subjects/math-g9.png',
+    'g9_hindi':           '/tutor-media/images/subjects/hindi-g9.png',
+    'g9_mathematics':     '/tutor-media/images/subjects/math-g9.png',
     'g9_science':         'https://images.unsplash.com/photo-1507413245164-6160d8298b31?auto=format&fit=crop&q=90&w=800', // atomic structure looking
-    'g9_social-science':  '/images/subjects/social-science-g9.png',
+    'g9_social-science':  '/tutor-media/images/subjects/social-science-g9.png',
     'g9_it':              'https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&q=90&w=800',
 
     // ─── GRADE 10 ─────────────────────────────────────────────────────────────
     'g10_english':        'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&q=90&w=800', // book stack
-    'g10_hindi':          '/images/subjects/hindi-g10.png',
+    'g10_hindi':          '/tutor-media/images/subjects/hindi-g10.png',
     'g10_mathematics':    'https://images.unsplash.com/photo-1453733190371-0a9bedd82893?auto=format&fit=crop&q=90&w=800', // math puzzle
     'g10_science':        'https://images.unsplash.com/photo-1576086213369-97a306d36557?auto=format&fit=crop&q=90&w=800', // biology/microbes
-    'g10_social-science': '/images/subjects/social-science-g10.png',
+    'g10_social-science': '/tutor-media/images/subjects/social-science-g10.png',
     'g10_it':             'https://images.unsplash.com/photo-1461749280684-dccba630e2f6?auto=format&fit=crop&q=90&w=800',
 
     // ─── GRADE 11 ─────────────────────────────────────────────────────────────
@@ -98,12 +98,12 @@ const SUBJECT_IMAGES: Record<string, string> = {
     'g11_mathematics':    'https://images.unsplash.com/photo-1518133910546-b6c2fb7d79e3?auto=format&fit=crop&q=90&w=800', // chalkboard equations
     'g11_physics':        'https://images.unsplash.com/photo-1636466497217-26a8cbeaf0aa?auto=format&fit=crop&q=90&w=800', // Newton's cradle / physics
     'g11_chemistry':      'https://images.unsplash.com/photo-1582719471384-894fbb16e074?auto=format&fit=crop&q=90&w=800', // chemistry apparatus
-    'g11_biology':        '/images/subjects/biology-g11.png',
+    'g11_biology':        '/tutor-media/images/subjects/biology-g11.png',
     'g11_computer-science':'https://images.unsplash.com/photo-1555949963-ff9fe0c870eb?auto=format&fit=crop&q=90&w=800',
 
     // ─── GRADE 12 ─────────────────────────────────────────────────────────────
     'g12_english':        'https://images.unsplash.com/photo-1516979187457-637abb4f9353?auto=format&fit=crop&q=90&w=800', // reading book
-    'g12_mathematics':    '/images/subjects/math-g12.png',
+    'g12_mathematics':    '/tutor-media/images/subjects/math-g12.png',
     'g12_physics':        'https://images.unsplash.com/photo-1555664424-778a1e5e1b48?auto=format&fit=crop&q=90&w=800', // electronics / electromagnetism
     'g12_chemistry':      'https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?auto=format&fit=crop&q=90&w=800', // chemical glassware
     'g12_biology':        'https://images.unsplash.com/photo-1559757175-5700dde675bc?auto=format&fit=crop&q=90&w=800', // biology microscope
@@ -113,7 +113,7 @@ const SUBJECT_IMAGES: Record<string, string> = {
 // Fallback images per subject ID (no grade prefix)
 const SUBJECT_FALLBACK: Record<string, string> = {
     'english':         'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&q=90&w=800', // open book
-    'hindi':           '/images/subjects/hindi-g11.png',
+    'hindi':           '/tutor-media/images/subjects/hindi-g11.png',
     'mathematics':     'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?auto=format&fit=crop&q=90&w=800', // geometry / graphs
     'science':         'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&q=90&w=800', // test tubes
     'social-science':  'https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=90&w=800', // globe / society

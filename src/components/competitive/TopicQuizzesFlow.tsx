@@ -146,7 +146,7 @@ export default function TopicQuizzesFlow() {
                                 // High-quality educational images tailored for each core subject
                                 const SUBJECT_IMAGES: Record<string, string> = {
                                     'physics': 'https://images.unsplash.com/photo-1636466497217-26a8cbeaf0aa?q=80&w=800&auto=format&fit=crop',
-                                    'chemistry': '/images/subjects/chemistry.png',
+                                    'chemistry': '/tutor-media/images/subjects/chemistry.png',
                                     'mathematics': 'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?q=80&w=800&auto=format&fit=crop',
                                     'biology': 'https://images.unsplash.com/photo-1530026405186-ed1f139313f8?q=80&w=800&auto=format&fit=crop',
                                     'english': 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?q=80&w=800&auto=format&fit=crop',

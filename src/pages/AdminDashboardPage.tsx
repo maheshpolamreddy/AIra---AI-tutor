@@ -9,6 +9,7 @@ import {
 import { useAuthStore } from '../stores/authStore';
 import { useCurriculumStore } from '../stores/curriculumStore';
 import { getRoutesForRole, adminRoutes } from '../utils/routes';
+import { redirectToLandingLogin } from '../lib/authSession';
 import { schoolGrades } from '../data/schoolCurriculum';
 import PageTransition from '../components/common/PageTransition';
 import Breadcrumbs from '../components/common/Breadcrumbs';
@@ -23,15 +24,19 @@ export default function AdminDashboardPage() {
   const [selectedTeacher, setSelectedTeacher] = useState<TeacherStats | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     toast.success('Logged out successfully');
-    navigate('/');
+    redirectToLandingLogin('/admin/dashboard');
   };
 
-  const handleSwitchRole = () => {
-    logout();
-    navigate('/');
+  const handleSwitchRole = async () => {
+    if (import.meta.env.DEV) {
+      navigate('/dev/demo-roles');
+      return;
+    }
+    await logout();
+    redirectToLandingLogin('/admin/dashboard');
   };
 
   // Filter teachers based on selection (Mock logic)

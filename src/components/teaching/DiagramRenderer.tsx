@@ -5,13 +5,13 @@ import { preloadService } from '../../utils/visualPreloadService';
 /**
  * DiagramRenderer — Data-Driven SVG Diagram Engine
  *
- * Loads SVG assets from /diagrams/{svg_path} based on registry data.
+ * Loads SVG assets from /tutor-media/diagrams/{svg_path} based on registry data.
  * No per-topic logic. No fallback to generic visuals.
  * If svg_path is missing or SVG fails to load → shows DiagramUnavailable.
  */
 
 interface DiagramRendererProps {
-    /** Path relative to /diagrams/ e.g. "atomic_theory/atom_bohr.svg" */
+    /** Path relative to /tutor-media/diagrams/ e.g. "atomic_theory/atom_bohr.svg" */
     svg_path: string | undefined;
     /** Human-readable title for the diagram */
     title?: string;
@@ -72,12 +72,12 @@ const DiagramUnavailable: React.FC<{ title?: string; reason?: string }> = ({ tit
 );
 
 /**
- * DiagramRenderer — renders a single SVG diagram from the /diagrams/ directory.
+ * DiagramRenderer — renders a single SVG diagram from the /tutor-media/diagrams/ directory.
  *
  * Usage:
  *   <DiagramRenderer svg_path="atomic_theory/atom_bohr.svg" title="Bohr Model" />
  *
- * The svg_path is resolved to: /diagrams/{svg_path}
+ * The svg_path is resolved to: /tutor-media/diagrams/{svg_path}
  * SVGs must follow the blackboard standard: viewBox="0 0 400 280", dark green bg.
  */
 const DiagramRenderer: React.FC<DiagramRendererProps> = ({

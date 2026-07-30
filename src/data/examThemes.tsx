@@ -118,7 +118,7 @@ export const EXAM_THEMES: Record<string, ExamTheme> = {
 };
 
 export const EXAM_IMAGES: Record<string, string> = {
-    'jee-main': '/images/exams/jee-main.png', 
+    'jee-main': '/tutor-media/images/exams/jee-main.png', 
     'jee-advanced': 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?q=80&w=800&auto=format&fit=crop', 
     'neet': 'https://images.unsplash.com/photo-1576091160550-2173dba999ef?q=80&w=800&auto=format&fit=crop', 
     'eamcet': 'https://images.unsplash.com/photo-1510070112810-d4e9a46d9e91?q=80&w=800&auto=format&fit=crop',
@@ -126,10 +126,10 @@ export const EXAM_IMAGES: Record<string, string> = {
     'ntse': 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?q=80&w=800&auto=format&fit=crop', 
     'gate': 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=800&auto=format&fit=crop', 
     'rjc-cet': 'https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?q=80&w=800&auto=format&fit=crop', 
-    'sainik': '/images/exams/sainik.png',
-    'navodaya': '/images/exams/navodaya.png',
-    'kv': '/images/exams/kv.png',
-    'emrs': '/images/exams/emrs.png',
+    'sainik': '/tutor-media/images/exams/sainik.png',
+    'navodaya': '/tutor-media/images/exams/navodaya.png',
+    'kv': '/tutor-media/images/exams/kv.png',
+    'emrs': '/tutor-media/images/exams/emrs.png',
     'nmms': 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?q=80&w=800&auto=format&fit=crop',
     'olympiad': 'https://images.unsplash.com/photo-1531482615713-2afd69097998?q=80&w=800&auto=format&fit=crop',
     'rgukt-iiit': 'https://images.unsplash.com/photo-1562774053-701939374585?q=80&w=800&auto=format&fit=crop'

@@ -8,6 +8,7 @@ import {
 import { useAuthStore } from '../stores/authStore';
 import { useCurriculumStore } from '../stores/curriculumStore';
 import { getRoutesForRole, teacherRoutes } from '../utils/routes';
+import { redirectToLandingLogin } from '../lib/authSession';
 import { schoolGrades } from '../data/schoolCurriculum';
 import PageTransition from '../components/common/PageTransition';
 import Breadcrumbs from '../components/common/Breadcrumbs';
@@ -21,15 +22,19 @@ export default function TeacherDashboardPage() {
   const { selectedGrade, selectedSubject, setSelectedGrade, setSelectedSubject } = useCurriculumStore();
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     toast.success('Logged out successfully');
-    navigate('/');
+    redirectToLandingLogin('/teacher/dashboard');
   };
 
-  const handleSwitchRole = () => {
-    logout();
-    navigate('/');
+  const handleSwitchRole = async () => {
+    if (import.meta.env.DEV) {
+      navigate('/dev/demo-roles');
+      return;
+    }
+    await logout();
+    redirectToLandingLogin('/teacher/dashboard');
   };
 
   const weakTopics = MOCK_CLASS_PERFORMANCE.filter(t => t.score < 60);

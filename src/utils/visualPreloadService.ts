@@ -156,7 +156,7 @@ class VisualPreloadService {
     private async preloadUrl(url: string): Promise<void> {
         if (!url || this.cache.has(url)) return;
 
-        // If it's an SVG from the /diagrams/ folder, pre-fetch its TEXT
+        // If it's an SVG from the /tutor-media/diagrams/ folder, pre-fetch its TEXT
         // This is crucial to prevent DiagramRenderer from showing a spinner
         if (url.endsWith('.svg')) {
             try {

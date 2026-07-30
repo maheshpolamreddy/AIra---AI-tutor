@@ -20,6 +20,7 @@ import {
     isVoiceCompatibleWithLanguage,
 } from '../utils/voice';
 import { clearVoiceCache, unlockAudioContext } from '../hooks/useSpeech';
+import { fetchTtsAudioBlob } from '../utils/ttsClient';
 
 type SettingsTab = 'account' | 'learning' | 'accessibility' | 'ai' | 'privacy';
 
@@ -238,42 +239,41 @@ export default function SettingsPage({ onClose }: { onClose?: () => void }) {
         let usedBackend = false;
 
         try {
-            const response = await fetch('/api/tts', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    text: sampleText,
-                    language: ttsLanguage,
-                    speaker: ttsSpeaker,
-                    pace: ttsSpeed,
-                }),
+            const audioBlob = await fetchTtsAudioBlob({
+                text: sampleText,
+                language: ttsLanguage,
+                speaker: ttsSpeaker,
+                pace: ttsSpeed,
             });
 
-            if (response.ok) {
-                const audioBlob = await response.blob();
-                if (audioBlob.size > 0) {
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    await new Promise<void>((resolve) => {
-                        const audio = new Audio(audioUrl);
-                        audio.preload = 'auto';
-                        audio.setAttribute('playsinline', 'true');
-                        previewAudioRef.current = audio;
-                        const cleanup = () => {
-                            previewAudioRef.current = null;
-                            URL.revokeObjectURL(audioUrl);
-                            resolve();
-                        };
-                        audio.onended = cleanup;
-                        audio.onerror = cleanup;
-                        // Handle stall on slow mobile connections
-                        let stallTimer: ReturnType<typeof setTimeout> | null = null;
-                        audio.onstalled = () => { stallTimer = setTimeout(cleanup, 5000); };
-                        audio.onplaying = () => { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } };
-                        const p = audio.play();
-                        if (p) p.catch(cleanup);
-                    });
-                    usedBackend = true;
-                }
+            if (audioBlob.size > 0) {
+                const audioUrl = URL.createObjectURL(audioBlob);
+                await new Promise<void>((resolve, reject) => {
+                    const audio = new Audio(audioUrl);
+                    audio.preload = 'auto';
+                    audio.setAttribute('playsinline', 'true');
+                    previewAudioRef.current = audio;
+                    let started = false;
+                    const cleanup = (ok: boolean) => {
+                        previewAudioRef.current = null;
+                        URL.revokeObjectURL(audioUrl);
+                        if (ok) resolve();
+                        else reject(new Error('Preview playback failed'));
+                    };
+                    audio.onplay = () => { started = true; };
+                    audio.onended = () => cleanup(true);
+                    audio.onerror = () => cleanup(started);
+                    // Handle stall on slow mobile connections
+                    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+                    audio.onstalled = () => { stallTimer = setTimeout(() => cleanup(started), 5000); };
+                    audio.onplaying = () => {
+                        started = true;
+                        if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
+                    };
+                    const p = audio.play();
+                    if (p) p.catch(() => cleanup(false));
+                });
+                usedBackend = true;
             }
         } catch {
             // Backend unavailable; browser fallback below.
@@ -316,7 +316,7 @@ export default function SettingsPage({ onClose }: { onClose?: () => void }) {
                 if (isNonEnglish && !voiceMatchesLang) {
                     const langLabel = TTS_LANGUAGE_OPTIONS.find(l => l.value === ttsLanguage)?.label || ttsLanguage;
                     toast.error(
-                        `Voice preview for ${langLabel} needs Sarvam TTS (set SARVAM_API_KEY and run npm run dev:vercel so /api/tts works), or install a ${langLabel} system voice.`,
+                        `Voice preview for ${langLabel} needs Sarvam TTS (set SARVAM_API_KEY on the landing app and keep it running on :3000 so /api/tts works), or install a ${langLabel} system voice.`,
                         8000
                     );
                     setIsTestingAi(false);

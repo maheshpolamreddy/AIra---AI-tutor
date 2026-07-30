@@ -2,10 +2,11 @@
  * Voice for the "Raise a Doubt" chat teacher.
  * Independent of the lesson TTS pipeline (useSpeech) so a doubt answer can be
  * spoken while the lesson audio stays paused at its exact position.
- * Sarvam TTS first, browser speechSynthesis as fallback.
+ * Backend /api/tts → Sarvam client → browser speechSynthesis.
  */
 import { aiService } from '../services/aiService';
 import { forEachSarvamWavChunk } from './sarvamAudio';
+import { fetchTtsAudioBlob } from './ttsClient';
 import { pickBestHumanVoice } from './voice';
 
 export interface DoubtSpeechOptions {
@@ -92,6 +93,29 @@ function speakWithBrowser(text: string, opts: DoubtSpeechOptions, isCurrent: () 
     });
 }
 
+function playBlob(blob: Blob, isCurrent: () => boolean): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+        if (!isCurrent()) {
+            resolve();
+            return;
+        }
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.setAttribute('playsinline', 'true');
+        activeAudio = audio;
+        const done = (ok: boolean, err?: Error) => {
+            URL.revokeObjectURL(url);
+            if (ok) resolve();
+            else reject(err || new Error('Doubt speech playback failed'));
+        };
+        audio.onended = () => done(true);
+        audio.onerror = () => done(false, new Error('Doubt speech playback failed'));
+        audio.play().catch((err) => {
+            done(false, err instanceof Error ? err : new Error('Doubt speech autoplay blocked'));
+        });
+    });
+}
+
 /**
  * Speak a doubt-teacher reply. Any previous doubt speech is stopped first.
  * Resolves when playback finishes or is cancelled — never rejects.
@@ -104,35 +128,38 @@ export async function speakDoubtText(text: string, opts: DoubtSpeechOptions): Pr
     const speakable = toSpeakableText(text);
     if (!speakable) return;
 
+    const abort = new AbortController();
+    activeAbort = abort;
+
     try {
-        const dataUri = await aiService.fetchSarvamTTS(speakable, opts.language, opts.speaker);
-        if (!isCurrent()) return;
-        const abort = new AbortController();
-        activeAbort = abort;
-        await forEachSarvamWavChunk(dataUri, (blob) => new Promise<void>((resolve, reject) => {
-            if (!isCurrent()) {
-                resolve();
-                return;
-            }
-            const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
-            audio.setAttribute('playsinline', 'true');
-            activeAudio = audio;
-            const done = () => {
-                URL.revokeObjectURL(url);
-                resolve();
-            };
-            audio.onended = done;
-            audio.onerror = () => {
-                URL.revokeObjectURL(url);
-                reject(new Error('Doubt speech playback failed'));
-            };
-            audio.play().catch((err) => {
-                URL.revokeObjectURL(url);
-                reject(err instanceof Error ? err : new Error('Doubt speech autoplay blocked'));
+        // Tier 1: same-origin /api/tts (landing or tutor backend)
+        try {
+            const blob = await fetchTtsAudioBlob({
+                text: speakable,
+                language: opts.language,
+                speaker: opts.speaker,
+                pace: opts.speed,
+                signal: abort.signal,
             });
-        }), { signal: abort.signal });
-    } catch {
+            if (!isCurrent()) return;
+            await playBlob(blob, isCurrent);
+            return;
+        } catch {
+            // fall through
+        }
+
+        try {
+            // Tier 2: client Sarvam
+            const dataUri = await aiService.fetchSarvamTTS(speakable, opts.language, opts.speaker);
+            if (!isCurrent()) return;
+            await forEachSarvamWavChunk(dataUri, (chunkBlob) => playBlob(chunkBlob, isCurrent), {
+                signal: abort.signal,
+            });
+            return;
+        } catch {
+            // fall through
+        }
+
         if (!isCurrent()) return;
         await speakWithBrowser(speakable, opts, isCurrent);
     } finally {

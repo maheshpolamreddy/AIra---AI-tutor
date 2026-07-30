@@ -7,6 +7,7 @@ import { emitVisualMarker } from '../utils/visualSyncEngine';
 import { stripMarkers } from '../utils/markerParser';
 import { aiService } from '../services/aiService';
 import { forEachSarvamWavChunk } from '../utils/sarvamAudio';
+import { fetchTtsAudioBlob } from '../utils/ttsClient';
 
 let _cachedVoice: SpeechSynthesisVoice | null = null;
 let _cachedLang: string | null = null;
@@ -294,13 +295,17 @@ export function useSpeech(
 
     const playAudioBlob = useCallback(async (blob: Blob, chunkText?: string, marker?: string | null, playbackRunId?: number) => {
         if (playbackRunId !== undefined && speechPlaybackGenRef.current !== playbackRunId) return;
+        // Reject non-audio (e.g. JSON mistaken for WAV) so the TTS pipeline can fall back.
+        if (!blob || blob.size < 64) {
+            throw new Error('Empty audio blob');
+        }
         const url = URL.createObjectURL(blob);
         if (_audioContext?.state === 'suspended') {
             await _audioContext.resume().catch(() => {});
         }
         if (playbackRunId !== undefined && speechPlaybackGenRef.current !== playbackRunId) return;
         
-        await new Promise<void>((resolve) => {
+        await new Promise<void>((resolve, reject) => {
             if (playbackRunId !== undefined && speechPlaybackGenRef.current !== playbackRunId) {
                 URL.revokeObjectURL(url);
                 resolve();
@@ -313,31 +318,50 @@ export function useSpeech(
             // @ts-expect-error webkit prefix for older iOS
             audio.webkitPlaysInline = true;
             audioRef.current = audio;
+            let settled = false;
+            let didStart = false;
 
-            const done = () => {
+            const cleanup = () => {
                 audio.onplay = null; audio.onended = null; audio.onerror = null;
-                audio.onpause = null; audio.onstalled = null;
+                audio.onpause = null; audio.onstalled = null; audio.onplaying = null;
                 audioRef.current = null;
                 URL.revokeObjectURL(url);
+            };
+            const done = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
                 resolve();
+            };
+            const fail = (reason: string) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                // Only fail hard if playback never started — otherwise treat as end.
+                if (!didStart) reject(new Error(reason));
+                else resolve();
             };
             audio.onplay = () => {
                 if (playbackRunId !== undefined && speechPlaybackGenRef.current !== playbackRunId) return;
+                didStart = true;
                 if (isMountedRef.current) setSpeaking(true);
                 if (marker) emitVisualMarker(marker);
                 if (chunkText) window.dispatchEvent(new CustomEvent('speech-active-chunk', { detail: { chunkText } }));
             };
             audio.onended = done;
-            audio.onerror = done;
+            audio.onerror = () => fail('Audio element error');
             let stallTimer: ReturnType<typeof setTimeout> | null = null;
-            audio.onstalled = () => { stallTimer = setTimeout(done, 5000); };
-            audio.onplaying = () => { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } };
+            audio.onstalled = () => { stallTimer = setTimeout(() => fail('Audio stalled'), 5000); };
+            audio.onplaying = () => {
+                didStart = true;
+                if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
+            };
 
             const playPromise = audio.play();
             if (playPromise) {
                 playPromise.catch((err) => {
                     console.warn('[useSpeech] Audio play rejected:', err.message);
-                    done();
+                    fail(err.message || 'Audio play rejected');
                 });
             }
         });
@@ -442,18 +466,16 @@ export function useSpeech(
                 for (let attempt = 0; attempt <= TTS_MAX_RETRIES; attempt++) {
                     if (speechPlaybackGenRef.current !== playbackRunId || ac.signal.aborted) return;
                     try {
-                        const res = await fetch('/api/tts', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ text: chunkText, language: langForApi, speaker: eSpeaker, pace: eSpeed }),
+                        const blob = await fetchTtsAudioBlob({
+                            text: chunkText,
+                            language: langForApi,
+                            speaker: eSpeaker,
+                            pace: eSpeed,
                             signal: ac.signal,
                         });
-                        if (res.ok) {
-                            const blob = await res.blob();
-                            if (blob && blob.size > 0) {
-                                prefetchCache.current[chunkText] = { blob, type: 'api' };
-                                return;
-                            }
+                        if (blob && blob.size > 0) {
+                            prefetchCache.current[chunkText] = { blob, type: 'api' };
+                            return;
                         }
                     } catch {
                         // silent fallback
@@ -562,13 +584,13 @@ export function useSpeech(
                     }
                     if (speechPlaybackGenRef.current !== playbackRunId) return false;
                     if (ac.signal.aborted || userStoppedPlaybackRef.current) return false;
-                    const res = await fetch('/api/tts', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: chunk, language: langForApi, speaker: eSpeaker, pace: eSpeed }),
+                    const blob = await fetchTtsAudioBlob({
+                        text: chunk,
+                        language: langForApi,
+                        speaker: eSpeaker,
+                        pace: eSpeed,
                         signal: ac.signal,
                     });
-                    if (!res.ok) throw new Error(`Status ${res.status}`);
-                    const blob = await res.blob();
                     if (!blob || blob.size === 0) throw new Error('Empty audio');
                     consecutiveSarvamFails.count = 0;
                     _backendTtsFailureCount = 0;

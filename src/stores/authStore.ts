@@ -2,8 +2,19 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User, AuthState, AppRole } from '../types';
 import { auth } from '../lib/firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signOut as firebaseSignOut } from 'firebase/auth';
+import {
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    updateProfile,
+    signOut as firebaseSignOut,
+    type User as FirebaseUser,
+} from 'firebase/auth';
 import { useCurriculumStore } from './curriculumStore';
+import {
+    fetchUserAppRole,
+    mapFirebaseUser,
+    normalizeAppRole,
+} from '../lib/authSession';
 
 /** Map Firebase Auth errors for readable signup/login toasts */
 function firebaseAuthMessage(error: unknown): string | null {
@@ -27,12 +38,16 @@ function firebaseAuthMessage(error: unknown): string | null {
 }
 
 function normalizeEmailAppRole(role?: AppRole): AppRole {
-    return role === 'teacher' || role === 'admin' ? role : 'student';
+    return normalizeAppRole(role);
 }
 
 interface AuthStore extends AuthState {
+    /** True after first Firebase onAuthStateChanged callback. */
+    authReady: boolean;
     login: (user: User) => void;
     setRole: (role: AppRole) => void;
+    /** Bridge landing Firebase session into the tutor store. */
+    applyFirebaseUser: (fbUser: FirebaseUser | null) => Promise<void>;
     loginWithGoogle: () => Promise<void>;
     loginWithApple: () => Promise<void>;
     loginWithEmail: (email: string, password: string, appRole?: AppRole) => Promise<void>;
@@ -44,12 +59,11 @@ interface AuthStore extends AuthState {
     enterStudentDemo: () => void;
     enterTeacherDemo: () => void;
     enterAdminDemo: () => void;
-    logout: () => void;
+    logout: () => Promise<void>;
     recoverPassword: (email: string) => Promise<void>;
     resetPassword: (token: string, newPassword: string) => Promise<void>;
 }
 
-// Mock user for demo/guest
 const createGuestUser = (): User => ({
     id: 'guest_' + Date.now(),
     email: 'guest@aitutor.demo',
@@ -72,23 +86,66 @@ const createDemoUser = (roleLabel: string): User => ({
 
 export const useAuthStore = create<AuthStore>()(
     persist(
-        (set) => ({
+        (set, get) => ({
             user: null,
             isAuthenticated: false,
             isLoading: false,
             isGuest: false,
             role: null,
             isDemo: false,
+            authReady: false,
 
             login: (user) => set({
                 user,
                 isAuthenticated: true,
                 isGuest: user.authMethod === 'guest',
                 role: 'student',
-                isDemo: false
+                isDemo: false,
             }),
 
             setRole: (role) => set({ role }),
+
+            applyFirebaseUser: async (fbUser) => {
+                if (!fbUser) {
+                    // Keep explicit local demo sessions; clear everything else.
+                    if (get().isDemo) {
+                        set({ authReady: true });
+                        return;
+                    }
+                    set({
+                        user: null,
+                        isAuthenticated: false,
+                        isGuest: false,
+                        role: null,
+                        isDemo: false,
+                        isLoading: false,
+                        authReady: true,
+                    });
+                    return;
+                }
+
+                const user = mapFirebaseUser(fbUser);
+                // Unblock UI immediately with persisted/optimistic role; refine from Firestore next.
+                const cachedRole = normalizeAppRole(get().role ?? 'student');
+                set({
+                    user,
+                    isAuthenticated: true,
+                    isGuest: false,
+                    role: cachedRole,
+                    isDemo: false,
+                    isLoading: false,
+                    authReady: true,
+                });
+
+                try {
+                    const role = await fetchUserAppRole(fbUser.uid);
+                    if (get().user?.id === fbUser.uid) {
+                        set({ role });
+                    }
+                } catch {
+                    // keep optimistic role
+                }
+            },
 
             loginWithGoogle: async () => {
                 set({ isLoading: true });
@@ -118,7 +175,7 @@ export const useAuthStore = create<AuthStore>()(
                     await new Promise(resolve => setTimeout(resolve, 1500));
                     const user: User = {
                         id: 'apple_' + Date.now(),
-                        email: 'user@privaterelay.appleid.com',
+                        email: 'user@icloud.com',
                         name: 'Apple User',
                         displayName: 'Apple User',
                         authMethod: 'apple',
@@ -137,18 +194,11 @@ export const useAuthStore = create<AuthStore>()(
                 set({ isLoading: true });
                 try {
                     const userCredential = await signInWithEmailAndPassword(auth, email, password);
-                    const app = normalizeEmailAppRole(appRole);
-                    const fallbackName = email.split('@')[0] || email;
-                    const user: User = {
-                        id: userCredential.user.uid,
-                        email: userCredential.user.email || email,
-                        name: userCredential.user.displayName || fallbackName,
-                        displayName: userCredential.user.displayName || fallbackName,
-                        authMethod: 'email',
-                        isVerified: userCredential.user.emailVerified,
-                        createdAt: new Date().toISOString(),
-                    };
-                    set({ user, isAuthenticated: true, isLoading: false, isGuest: false, role: app, isDemo: false });
+                    const role = appRole
+                        ? normalizeEmailAppRole(appRole)
+                        : await fetchUserAppRole(userCredential.user.uid);
+                    const user = mapFirebaseUser(userCredential.user);
+                    set({ user, isAuthenticated: true, isLoading: false, isGuest: false, role, isDemo: false });
                 } catch (error) {
                     console.error('Email login failed:', error);
                     set({ isLoading: false });
@@ -162,15 +212,9 @@ export const useAuthStore = create<AuthStore>()(
                 try {
                     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                     await updateProfile(userCredential.user, { displayName: name });
-                    const user: User = {
-                        id: userCredential.user.uid,
-                        email: userCredential.user.email || email,
-                        name,
-                        displayName: name,
-                        authMethod: 'email',
-                        isVerified: false,
-                        createdAt: new Date().toISOString(),
-                    };
+                    const user = mapFirebaseUser(userCredential.user);
+                    user.name = name;
+                    user.displayName = name;
                     const app = normalizeEmailAppRole(appRole);
                     set({ user, isAuthenticated: true, isLoading: false, isGuest: false, role: app, isDemo: false });
                 } catch (error) {
@@ -181,18 +225,16 @@ export const useAuthStore = create<AuthStore>()(
                 }
             },
 
+            // Kept for possible school roll-number flow; not exposed in UI until migrated to landing.
             loginWithRollNumber: async (rollNumber, dob) => {
                 set({ isLoading: true });
                 try {
-                    // Map Roll No + DOB to a unique identifier for firebase
-                    // Format: student_{roll}_{dob}@aitutor.internal
                     const internalEmail = `student_${rollNumber.toLowerCase()}_${dob.replace(/-/g, '')}@aitutor.internal`;
                     const internalPassword = `auth_${rollNumber}_${dob}`;
-                    
                     const userCredential = await signInWithEmailAndPassword(auth, internalEmail, internalPassword);
                     const user: User = {
                         id: userCredential.user.uid,
-                        email: rollNumber, // Display Roll Number as email/ID
+                        email: rollNumber,
                         name: userCredential.user.displayName || `Student ${rollNumber}`,
                         displayName: userCredential.user.displayName || rollNumber,
                         authMethod: 'email',
@@ -213,10 +255,8 @@ export const useAuthStore = create<AuthStore>()(
                 try {
                     const internalEmail = `student_${rollNumber.toLowerCase()}_${dob.replace(/-/g, '')}@aitutor.internal`;
                     const internalPassword = `auth_${rollNumber}_${dob}`;
-
                     const userCredential = await createUserWithEmailAndPassword(auth, internalEmail, internalPassword);
                     await updateProfile(userCredential.user, { displayName: name });
-                    
                     const user: User = {
                         id: userCredential.user.uid,
                         email: rollNumber,
@@ -267,30 +307,26 @@ export const useAuthStore = create<AuthStore>()(
                 set({ user, isAuthenticated: true, isGuest: false, role: 'admin', isDemo: true });
             },
 
-            logout: () => {
-                // Sign out of Firebase session so the auth token is properly invalidated
-                firebaseSignOut(auth).catch((err) => {
+            logout: async () => {
+                try {
+                    await firebaseSignOut(auth);
+                } catch (err) {
                     if (import.meta.env.DEV) console.warn('[authStore] Firebase signOut error (ignored):', err);
-                });
-                
-                // Clear curriculum selection globally on logout to avoid state leakage
+                }
                 useCurriculumStore.getState().clearSelection();
-
                 set({
                     user: null,
                     isAuthenticated: false,
                     isGuest: false,
                     role: null,
-                    isDemo: false
+                    isDemo: false,
                 });
             },
 
             recoverPassword: async (_email) => {
-                // Email parameter required by interface but not used in mock implementation
-                void _email; // Explicitly mark as intentionally unused
+                void _email;
                 try {
                     await new Promise(resolve => setTimeout(resolve, 1000));
-                    // Mock: email sent
                 } catch (error) {
                     console.error('Password recovery failed:', error);
                     throw error;
@@ -298,12 +334,10 @@ export const useAuthStore = create<AuthStore>()(
             },
 
             resetPassword: async (_token, _newPassword) => {
-                // Token and password parameters required by interface but not used in mock implementation
-                void _token; // Explicitly mark as intentionally unused
-                void _newPassword; // Explicitly mark as intentionally unused
+                void _token;
+                void _newPassword;
                 try {
                     await new Promise(resolve => setTimeout(resolve, 1000));
-                    // Mock: password reset
                 } catch (error) {
                     console.error('Password reset failed:', error);
                     throw error;
@@ -312,16 +346,21 @@ export const useAuthStore = create<AuthStore>()(
         }),
         {
             name: 'ai-tutor-auth',
-            version: 3, // Bump version to 3 to apply new persistence rule for demo sessions
-            partialize: (state) => {
-                return {
-                    user: state.user,
-                    isAuthenticated: state.isAuthenticated,
-                    isGuest: state.isGuest,
-                    role: state.role,
-                    isDemo: state.isDemo,
-                };
-            },
+            // v4: Firebase session is source of truth; drop stale demo persistence as auth gate
+            version: 4,
+            partialize: (state) => ({
+                // Do not persist isAuthenticated — Firebase onAuthStateChanged rehydrates it.
+                role: state.role,
+                isDemo: state.isDemo,
+                user: state.isDemo ? state.user : null,
+            }),
+            migrate: () => ({
+                user: null,
+                isAuthenticated: false,
+                isGuest: false,
+                role: null,
+                isDemo: false,
+            }),
         }
     )
 );

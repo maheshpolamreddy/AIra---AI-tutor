@@ -1,11 +1,31 @@
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
-import * as pdfjsLib from 'pdfjs-dist';
-
-// Use Vite's ?url import so the worker is a real string URL, not a module object.
-// This is the correct approach for Vite bundlers and prevents "Invalid workerSrc type" errors.
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-
 import mammoth from 'mammoth';
+
+type PdfJsModule = typeof import('pdfjs-dist');
+
+let pdfjsReady: Promise<PdfJsModule> | null = null;
+
+/**
+ * Lazy-load pdfjs only when a PDF is uploaded.
+ * Eager imports break TeachingPage boot under the landing→Vite proxy
+ * ("requested module '/node_modules/pdfjs-dist…'" ESM errors).
+ */
+async function getPdfJs(): Promise<PdfJsModule> {
+    if (!pdfjsReady) {
+        pdfjsReady = (async () => {
+            const pdfjsLib = await import('pdfjs-dist');
+            const workerMod = await import('pdfjs-dist/build/pdf.worker.mjs?url');
+            const workerSrc =
+                typeof workerMod.default === 'string'
+                    ? workerMod.default
+                    : String(workerMod.default ?? '');
+            if (workerSrc) {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
+            }
+            return pdfjsLib;
+        })();
+    }
+    return pdfjsReady;
+}
 
 /**
  * Extracts raw text from common document formats based on the file type.
@@ -40,6 +60,7 @@ export async function extractTextFromFile(file: File): Promise<string> {
 
 async function extractPdfText(file: File): Promise<string> {
     try {
+        const pdfjsLib = await getPdfJs();
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
         const numPages = pdf.numPages;
@@ -82,7 +103,6 @@ async function encodeImageToBase64(file: File): Promise<string> {
         const reader = new FileReader();
         reader.onload = () => {
             const result = reader.result as string;
-            // Prefix with special marker so the AI service knows this is an image
             resolve(`__IMAGE_BASE64__${result}`);
         };
         reader.onerror = () => reject(new Error('Failed to read image file.'));
