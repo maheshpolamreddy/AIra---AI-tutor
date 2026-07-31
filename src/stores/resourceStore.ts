@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { GeneratedNote, MindMap, MindMapNode, Flashcard, GeneratedSummary, ImageAnalysis } from '../types';
+import type { GeneratedNote, MindMap, MindMapNode, Flashcard, GeneratedSummary, ImageAnalysis, NotesGenerationContext } from '../types';
 import { toast } from './toastStore';
 import { aiService } from '../services/aiService';
 
@@ -8,7 +8,12 @@ interface ResourceStore {
     // Notes
     notes: GeneratedNote[];
     isGeneratingNotes: boolean;
-    generateNotes: (sessionId: string, topicName: string, content: string[]) => Promise<GeneratedNote>;
+    generateNotes: (
+        sessionId: string,
+        topicName: string,
+        content: string[],
+        context?: NotesGenerationContext,
+    ) => Promise<GeneratedNote>;
 
     // Mind Maps
     mindMaps: MindMap[];
@@ -47,9 +52,10 @@ import {
     generateMockSummary,
     createFlashcard 
 } from '../utils/generators';
+import { attachMeta, buildNotesPrompt, parseNotesAiResponse } from '../utils/notesGeneration';
 
 // Increased context limits for better AI grounding (BUG-002)
-const MAX_CONTEXT_CHARS = 12000;
+const MAX_CONTEXT_CHARS = 14000;
 
 export const useResourceStore = create<ResourceStore>((set, get) => ({
     notes: [],
@@ -80,7 +86,7 @@ export const useResourceStore = create<ResourceStore>((set, get) => ({
         }
     },
 
-    generateNotes: async (sessionId, topicName, content) => {
+    generateNotes: async (sessionId, topicName, content, context = {}) => {
         const currentState = get();
         if (currentState.isGeneratingNotes) throw new Error('Already generating');
         set({ isGeneratingNotes: true });
@@ -89,46 +95,30 @@ export const useResourceStore = create<ResourceStore>((set, get) => ({
                 throw new Error('Invalid params');
 
             const fullContent = content.join('\n\n').substring(0, MAX_CONTEXT_CHARS);
-            const prompt = `You are an expert educational content creator. Generate comprehensive, well-structured study notes for the topic: "${topicName}".
-
-Lesson content to base notes on:
-${fullContent}
-
-Return ONLY a valid JSON object in this exact format (no markdown, no extra text):
-{
-  "title": "${topicName} - Comprehensive Study Notes",
-  "sections": [
-    {"heading": "Introduction & Overview", "content": "...", "highlights": ["point1", "point2", "point3"]},
-    {"heading": "Key Concepts & Definitions", "content": "...", "highlights": ["concept1: definition", "concept2: definition"]},
-    {"heading": "Detailed Explanation", "content": "...", "highlights": ["insight1", "insight2"]},
-    {"heading": "Applications & Examples", "content": "...", "highlights": ["example1", "example2"]},
-    {"heading": "Key Takeaways", "content": "...", "highlights": ["takeaway1", "takeaway2", "takeaway3"]}
-  ],
-  "qualityScore": 90
-}`;
+            const prompt = buildNotesPrompt(topicName, fullContent, context);
 
             let note: GeneratedNote;
             try {
-                const aiResponse = await aiService.callAI(prompt);
-                const parsed = JSON.parse(aiResponse.trim().replace(/^```json?\n?/, '').replace(/\n?```$/, ''));
-                note = {
+                const aiResponse = await aiService.callAI(prompt, 3, 1000, { temperature: 0.35 });
+                const parsed = parseNotesAiResponse(aiResponse);
+                note = attachMeta({
                     id: `note_${Date.now()}`,
                     sessionId,
                     topicName,
-                    title: parsed.title || `${topicName} - Study Notes`,
+                    title: parsed.title || `${topicName} — Detailed Study Notes`,
                     content: fullContent,
-                    sections: parsed.sections || [],
+                    sections: parsed.sections,
                     userDoubts: [],
                     createdAt: new Date().toISOString(),
-                    qualityScore: parsed.qualityScore || 85,
-                };
-            } catch {
-                // Fallback to static generator
-                note = generateMockNotes(sessionId, topicName, content);
+                    qualityScore: parsed.qualityScore || 88,
+                }, context);
+            } catch (err) {
+                console.warn('[generateNotes] AI path failed, using grounded mock:', err);
+                note = attachMeta(generateMockNotes(sessionId, topicName, content, context), context);
             }
 
             set(state => ({ notes: [...state.notes, note], isGeneratingNotes: false }));
-            toast.success('Notes generated successfully');
+            toast.success('Detailed notes ready');
             return note;
         } catch (error) {
             set({ isGeneratingNotes: false });

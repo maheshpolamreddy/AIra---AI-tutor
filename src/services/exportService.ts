@@ -81,6 +81,34 @@ export const ExportService = {
                 });
                 currentY += 8;
             }
+
+            if (section.diagrams && section.diagrams.length > 0) {
+                section.diagrams.forEach(diagram => {
+                    if (currentY > 250) {
+                        doc.addPage();
+                        currentY = 20;
+                    }
+                    doc.setFontSize(11);
+                    doc.setTextColor(109, 40, 217);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text(`Diagram: ${diagram.title}`, margin + 5, currentY);
+                    currentY += 6;
+                    doc.setFont('helvetica', 'normal');
+                    doc.setTextColor(75, 85, 99);
+                    if (diagram.caption) {
+                        const captionLines = doc.splitTextToSize(diagram.caption, pageWidth - margin * 2 - 10);
+                        doc.text(captionLines, margin + 10, currentY);
+                        currentY += (captionLines.length * 5) + 2;
+                    }
+                    diagram.nodes.forEach(node => {
+                        const line = `• ${node.label}${node.detail ? ` — ${node.detail}` : ''}`;
+                        const lines = doc.splitTextToSize(line, pageWidth - margin * 2 - 10);
+                        doc.text(lines, margin + 10, currentY);
+                        currentY += (lines.length * 5) + 1;
+                    });
+                    currentY += 6;
+                });
+            }
         });
 
         // Footer
@@ -120,13 +148,26 @@ export const ExportService = {
                             spacing: { before: 400, after: 200 },
                         }),
                         new Paragraph({
-                            text: section.content,
+                            text: section.content.replace(/\*\*/g, ''),
                             spacing: { after: 200 },
                         }),
                         ...section.highlights.map(h => new Paragraph({
                             text: `• ${h}`,
                             bullet: { level: 0 },
                         })),
+                        ...(section.diagrams || []).flatMap(diagram => [
+                            new Paragraph({
+                                text: `Diagram: ${diagram.title}`,
+                                spacing: { before: 200, after: 100 },
+                            }),
+                            ...(diagram.caption
+                                ? [new Paragraph({ text: diagram.caption, spacing: { after: 100 } })]
+                                : []),
+                            ...diagram.nodes.map(n => new Paragraph({
+                                text: `• ${n.label}${n.detail ? ` — ${n.detail}` : ''}`,
+                                bullet: { level: 0 },
+                            })),
+                        ]),
                         new Paragraph({ text: "" }),
                     ]),
                 ],

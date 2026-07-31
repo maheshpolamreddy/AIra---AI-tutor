@@ -15,6 +15,7 @@ import {
     mapFirebaseUser,
     normalizeAppRole,
 } from '../lib/authSession';
+import { clearRoleHint, readRoleHint, writeRoleHint } from '../lib/sessionHints';
 
 /** Map Firebase Auth errors for readable signup/login toasts */
 function firebaseAuthMessage(error: unknown): string | null {
@@ -46,6 +47,8 @@ interface AuthStore extends AuthState {
     authReady: boolean;
     login: (user: User) => void;
     setRole: (role: AppRole) => void;
+    /** Rename the signed-in learner; writes through to Firebase so it survives a reload. */
+    updateDisplayName: (name: string) => Promise<void>;
     /** Bridge landing Firebase session into the tutor store. */
     applyFirebaseUser: (fbUser: FirebaseUser | null) => Promise<void>;
     loginWithGoogle: () => Promise<void>;
@@ -105,6 +108,16 @@ export const useAuthStore = create<AuthStore>()(
 
             setRole: (role) => set({ role }),
 
+            updateDisplayName: async (name) => {
+                const trimmed = name.trim();
+                const current = get().user;
+                if (!trimmed || !current) return;
+                if (auth.currentUser) {
+                    await updateProfile(auth.currentUser, { displayName: trimmed });
+                }
+                set({ user: { ...current, name: trimmed, displayName: trimmed } });
+            },
+
             applyFirebaseUser: async (fbUser) => {
                 if (!fbUser) {
                     // Keep explicit local demo sessions; clear everything else.
@@ -125,8 +138,10 @@ export const useAuthStore = create<AuthStore>()(
                 }
 
                 const user = mapFirebaseUser(fbUser);
-                // Unblock UI immediately with persisted/optimistic role; refine from Firestore next.
-                const cachedRole = normalizeAppRole(get().role ?? 'student');
+                // Unblock UI immediately with an optimistic role, then refine from
+                // Firestore. The hint written by the landing app at sign-in is what
+                // avoids a student-shaped first paint for teachers and admins.
+                const cachedRole = normalizeAppRole(get().role ?? readRoleHint() ?? 'student');
                 set({
                     user,
                     isAuthenticated: true,
@@ -141,6 +156,7 @@ export const useAuthStore = create<AuthStore>()(
                     const role = await fetchUserAppRole(fbUser.uid);
                     if (get().user?.id === fbUser.uid) {
                         set({ role });
+                        writeRoleHint(role);
                     }
                 } catch {
                     // keep optimistic role
@@ -314,6 +330,7 @@ export const useAuthStore = create<AuthStore>()(
                     if (import.meta.env.DEV) console.warn('[authStore] Firebase signOut error (ignored):', err);
                 }
                 useCurriculumStore.getState().clearSelection();
+                clearRoleHint();
                 set({
                     user: null,
                     isAuthenticated: false,

@@ -15,12 +15,12 @@ const FlashcardViewer = lazy(() => import('../components/studio/FlashcardViewer'
 const VerificationQuiz = lazy(() => import('../components/teaching/VerificationQuiz'));
 const QuizVisual = lazy(() => import('../components/teaching/QuizVisual'));
 const SummaryViewer = lazy(() => import('../components/studio/SummaryViewer'));
-const AnalyzerViewer = lazy(() => import('../components/studio/AnalyzerViewer'));
 import { useSpeech, unlockAudioContext } from '../hooks/useSpeech';
 import { useSessionControl } from '../hooks/useSessionControl';
 import type { ChatMessage, Topic } from '../types';
+import type { FeaturedToolItem, NotesGenerateStatus, StudioToolId, ToolItem } from '../components/StudioPanel';
 
-type StudioTabId = 'notes' | 'map' | 'flashcards' | 'quiz' | 'summary' | 'analyzer';
+type StudioTabId = StudioToolId;
 
 /** Human-readable names for supported teacher languages (drives the doubt-mode AI reply language). */
 const DOUBT_LANGUAGE_NAMES: Record<string, string> = {
@@ -52,10 +52,12 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
 import {
     ChevronLeft, ChevronRight, Square, Maximize2, Minimize2, Settings, HelpCircle,
     FileText, CreditCard, Sparkles, Loader2, MessageCircle, Layers,
-    Map as LucideMap, ArrowUp, Volume2, VolumeX, Home, Scan, Mic, PlayCircle, GraduationCap
+    Map as LucideMap, ArrowUp, Volume2, VolumeX, Home, Mic, PlayCircle, GraduationCap
 } from 'lucide-react';
 import { speakDoubtText, stopDoubtSpeech } from '../utils/doubtSpeech';
+import { UserAvatar, displayNameForUser } from '../components/common/UserAvatar';
 const QuizViewer = lazy(() => import('../components/studio/QuizViewer'));
+import StudioPanel from '../components/StudioPanel';
 import { toast } from '../stores/toastStore';
 import { studentRoutes } from '../utils/routes';
 const SettingsPage = lazy(() => import('./SettingsPage'));
@@ -111,33 +113,23 @@ export default function TeachingPage() {
         mindMaps,
         flashcards,
         isGeneratingNotes,
-        isGeneratingMindMap,
-        isGeneratingFlashcards,
         generateNotes,
         generateMindMap,
         generateFlashcards,
         updateFlashcardPerformance,
         summaries,
-        isGeneratingSummary,
         generateSummary,
-        analyzedImage,
-        isAnalyzing,
     } = useResourceStore(useShallow(state => ({
         notes: state.notes,
         mindMaps: state.mindMaps,
         flashcards: state.flashcards,
         isGeneratingNotes: state.isGeneratingNotes,
-        isGeneratingMindMap: state.isGeneratingMindMap,
-        isGeneratingFlashcards: state.isGeneratingFlashcards,
         generateNotes: state.generateNotes,
         generateMindMap: state.generateMindMap,
         generateFlashcards: state.generateFlashcards,
         updateFlashcardPerformance: state.updateFlashcardPerformance,
         summaries: state.summaries,
-        isGeneratingSummary: state.isGeneratingSummary,
         generateSummary: state.generateSummary,
-        analyzedImage: state.analyzedImage,
-        isAnalyzing: state.isAnalyzing,
     })));
 
     const {
@@ -204,6 +196,8 @@ export default function TeachingPage() {
     const timeoutRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
     const isMountedRef = useRef(true);
     const [isMobile, setIsMobile] = useState(false);
+    /** Tablet range (768–1023px) where the three panels stack in a scrolling column. */
+    const [isStacked, setIsStacked] = useState(false);
     const [playbackTrigger, setPlaybackTrigger] = useState(0);
     /** True after user clicks Stop listening / board stop — Resume must bump playbackTrigger to restart TTS. */
     const needsPlaybackRestartRef = useRef(false);
@@ -544,7 +538,10 @@ export default function TeachingPage() {
     const [chatMaximized, setChatMaximized] = useState(false);
     // Store previous visibility states before maximizing
     // (Removed in favor of purely CSS flex-based collapsing)
-    const [completedQuizCount, setCompletedQuizCount] = useState(2); // Starting with 2 as per user request example
+    const [completedQuizCount, setCompletedQuizCount] = useState(0);
+    /** Live Studio quiz progress (answered / generated questions) — drives the featured card. */
+    const [quizProgress, setQuizProgress] = useState<{ answered: number; total: number }>({ answered: 0, total: 0 });
+    const [lastQuizScore, setLastQuizScore] = useState<number | null>(null);
 
     // Resources for session
     const sessionId = currentSession?.id || '';
@@ -552,6 +549,143 @@ export default function TeachingPage() {
     const sessionMindMaps = mindMaps.filter(m => m.sessionId === sessionId);
     const sessionFlashcards = flashcards.filter(f => f.sessionId === sessionId);
     const sessionSummaries = summaries.filter(s => s.sessionId === sessionId);
+
+    /**
+     * Stacked panels lay out in a column, so these ratios would size height instead of
+     * width and squash each panel to a sliver (hiding footers like the quiz Next button).
+     * Stacked panels keep their natural height and the container scrolls instead.
+     */
+    const panelFlex = (hidden: boolean, maximized: boolean, ratio: string) => {
+        if (hidden) return '0 0 0px';
+        if (maximized) return '1 1 100%';
+        return isStacked ? '0 0 auto' : ratio;
+    };
+    const stackedPanelStyle: React.CSSProperties = isStacked
+        ? { minHeight: 'min(80vh, 640px)', flexShrink: 0 }
+        : { minHeight: 0 };
+
+    const studioFeaturedTool = useMemo<FeaturedToolItem>(() => {
+        const { answered, total } = quizProgress;
+        const finished = total > 0 && answered >= total;
+        const inProgress = answered > 0 && !finished;
+
+        let statusLabel = 'Not started yet';
+        if (lastQuizScore !== null) {
+            statusLabel = `Last score ${lastQuizScore}%`;
+        } else if (completedQuizCount > 0) {
+            statusLabel = `${completedQuizCount} quiz${completedQuizCount === 1 ? '' : 'zes'} completed`;
+        }
+
+        return {
+            id: 'quiz',
+            title: 'Quiz',
+            icon: HelpCircle,
+            accentColor: '#8B5CF6',
+            badge: completedQuizCount === 0 && answered === 0 ? 'New' : undefined,
+            description: 'Check understanding with adaptive practice questions',
+            progressCurrent: answered,
+            progressTotal: total,
+            statusLabel,
+            ctaLabel: finished ? 'Retake quiz' : inProgress ? 'Continue quiz' : 'Start quiz',
+        };
+    }, [quizProgress, lastQuizScore, completedQuizCount]);
+
+    const studioTools = useMemo<ToolItem[]>(() => [
+        {
+            id: 'notes',
+            title: 'Notes',
+            icon: FileText,
+            accentColor: '#3B82F6',
+            badge: sessionNotes.length > 0 ? 'Active' : undefined,
+            countLabel: sessionNotes.length > 0
+                ? `${sessionNotes.length} set${sessionNotes.length === 1 ? '' : 's'}`
+                : undefined,
+        },
+        {
+            id: 'map',
+            title: 'Mind Map',
+            icon: LucideMap,
+            accentColor: '#14B8A6',
+            countLabel: sessionMindMaps.length > 0
+                ? `${sessionMindMaps.length} map${sessionMindMaps.length === 1 ? '' : 's'}`
+                : undefined,
+        },
+        {
+            id: 'flashcards',
+            title: 'Flashcards',
+            icon: CreditCard,
+            accentColor: '#F59E0B',
+            badge: 'New',
+            countLabel: sessionFlashcards.length > 0
+                ? `${sessionFlashcards.length} card${sessionFlashcards.length === 1 ? '' : 's'}`
+                : undefined,
+        },
+        {
+            id: 'quiz',
+            title: 'Quiz',
+            icon: HelpCircle,
+            accentColor: '#8B5CF6',
+            badge: 'New',
+        },
+        {
+            id: 'summary',
+            title: 'Summary',
+            icon: Sparkles,
+            accentColor: '#EC4899',
+            countLabel: sessionSummaries.length > 0
+                ? (sessionSummaries.length === 1 ? '1 summary' : `${sessionSummaries.length} summaries`)
+                : undefined,
+        },
+    ], [
+        sessionNotes.length,
+        sessionMindMaps.length,
+        sessionFlashcards.length,
+        sessionSummaries.length,
+    ]);
+
+    const notesGenerateStatus: NotesGenerateStatus = isGeneratingNotes
+        ? 'processing'
+        : sessionNotes.length > 0
+            ? 'generated'
+            : 'ready';
+
+    const handleStudioToolClick = (toolId: StudioToolId) => {
+        setActiveStudioTab(toolId);
+        if (toolId === 'quiz') {
+            setStudioInViewer(true);
+            return;
+        }
+        if (toolId === 'notes' && sessionNotes.length > 0) {
+            setStudioInViewer(true);
+            return;
+        }
+        if (toolId === 'map' && sessionMindMaps.length > 0) {
+            setStudioInViewer(true);
+            return;
+        }
+        if (toolId === 'flashcards' && sessionFlashcards.length > 0) {
+            setStudioInViewer(true);
+            return;
+        }
+        if (toolId === 'summary' && sessionSummaries.length > 0) {
+            setStudioInViewer(true);
+            return;
+        }
+        // No content yet — keep tools home; hero card / generate flows create content.
+        if (toolId === 'summary') {
+            void handleGenerateSummary();
+        } else if (toolId === 'map') {
+            void handleGenerateMindMap();
+        } else if (toolId === 'flashcards') {
+            void handleGenerateFlashcards();
+        } else if (toolId === 'notes') {
+            toast.info('Use Generate now to create detailed notes for this topic.');
+        }
+    };
+
+    const handleStudioLearnMoreNotes = () => {
+        toast.info('AIra turns your lesson content into structured study notes you can review anytime.');
+    };
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -571,7 +705,8 @@ export default function TeachingPage() {
                     topicId: topicId || 'unknown',
                     completionPercentage: Math.round(useTeachingStore.getState().getProgress()) || 0,
                     doubtsCount: useTeachingStore.getState().currentSession?.doubts?.length || 0,
-                    quizScore: 0
+                    // No quizScore: leaving the page is not a quiz attempt, and a placeholder 0
+                    // would drag the learner's average score down.
                 });
             }
         };
@@ -817,6 +952,8 @@ export default function TeachingPage() {
         const checkMobile = () => {
             const mobile = window.innerWidth < 768; // md breakpoint
             setIsMobile(mobile);
+            // md → lg: panels stack vertically, so width ratios must not drive height.
+            setIsStacked(!mobile && window.innerWidth < 1024);
             // On mobile, ensure body doesn't scroll
             if (mobile) {
                 document.body.style.overflow = 'hidden';
@@ -852,14 +989,16 @@ export default function TeachingPage() {
             return;
         }
         try {
-            // Extract comprehensive content including spoken content for richer notes
             const content = currentSession.teachingSteps
                 .map(s => {
-                    // Combine content and spokenContent for comprehensive notes
-                    const parts = [];
+                    const parts: string[] = [];
+                    if (s.title) parts.push(`## ${s.title}`);
                     if (s.content) parts.push(s.content);
                     if (s.spokenContent && s.spokenContent !== s.content) {
                         parts.push(s.spokenContent);
+                    }
+                    if (s.keyConcepts && s.keyConcepts.length > 0) {
+                        parts.push(`Key concepts: ${s.keyConcepts.join(', ')}`);
                     }
                     return parts.join('\n\n');
                 })
@@ -869,7 +1008,19 @@ export default function TeachingPage() {
                 toast.warning('No content available to generate notes from.');
                 return;
             }
-            await generateNotes(currentSession.id, currentSession.topicName, content);
+
+            const keyConcepts = currentSession.teachingSteps
+                .flatMap(s => s.keyConcepts || [])
+                .filter(Boolean);
+
+            await generateNotes(currentSession.id, currentSession.topicName, content, {
+                subjectArea: topicInfo.subjectArea || undefined,
+                gradeLevel: topicInfo.gradeLevel || undefined,
+                chapterName: topicInfo.chapterName,
+                topicDescription: topicInfo.topicDescription,
+                subjectDescription: topicInfo.subjectDescription,
+                keyConcepts,
+            });
             setActiveStudioTab('notes');
             setStudioInViewer(true);
         } catch (error) {
@@ -1116,11 +1267,16 @@ export default function TeachingPage() {
                         <button
                             type="button"
                             onClick={() => setActiveModal('profile')}
-                            className="touch-target w-10 h-10 min-w-[44px] min-h-[44px] rounded-full flex items-center justify-center text-white font-medium text-[15px] hover:opacity-90 transition-opacity shrink-0 ml-1 cursor-pointer"
-                            style={{ backgroundColor: 'var(--teaching-avatar-red)' }}
-                            aria-label="Profile"
+                            className="touch-target min-w-[44px] min-h-[44px] rounded-full flex items-center justify-center hover:opacity-90 transition-opacity shrink-0 ml-1 cursor-pointer"
+                            aria-label={`Profile — ${displayNameForUser(user)}`}
+                            title={displayNameForUser(user)}
                         >
-                            {user?.name?.[0]?.toUpperCase() || 'A'}
+                            <UserAvatar
+                                user={user}
+                                size={36}
+                                className="ring-1 ring-black/5 dark:ring-white/10"
+                                fallbackStyle={{ backgroundColor: 'var(--teaching-avatar-red)' }}
+                            />
                         </button>
                     </div>
                 </div>
@@ -1193,7 +1349,7 @@ export default function TeachingPage() {
                                 >
                                     <ChevronRight className="w-5 h-5 shrink-0" />
                                 </button>
-                                <span className="text-xs text-gray-500 dark:text-gray-400 writing-mode-vertical rotate-180 mt-2 whitespace-nowrap font-bold uppercase tracking-widest">Chat</span>
+                                <span className="text-xs text-gray-500 dark:text-gray-400 writing-mode-vertical mt-2 whitespace-nowrap font-bold uppercase tracking-widest">Chat</span>
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -1206,7 +1362,7 @@ export default function TeachingPage() {
                         initial={isMobile ? { opacity: 0 } : { opacity: 0, flex: '0 0 0px' }}
                         animate={isMobile ? { opacity: mobilePanel === 'home' ? 1 : 0 } : {
                             opacity: ((centerMaximized || rightMaximized) && !chatMaximized) ? 0 : 1,
-                            flex: ((centerMaximized || rightMaximized) && !chatMaximized) ? '0 0 0px' : (chatMaximized ? '1 1 100%' : '23 23 0%'),
+                            flex: panelFlex((centerMaximized || rightMaximized) && !chatMaximized, chatMaximized, '23 23 0%'),
                             borderRadius: chatMaximized ? 0 : 'var(--teaching-panel-radius)',
                             boxShadow: chatMaximized ? 'none' : 'var(--teaching-panel-shadow)',
                         }}
@@ -1219,9 +1375,9 @@ export default function TeachingPage() {
                         } : {
                             background: 'var(--teaching-panel-bg)',
                             overflow: 'hidden',
-                            minHeight: 0,
                             alignSelf: 'stretch',
                             padding: 0,
+                            ...stackedPanelStyle,
                         }}
                     >
                         {/* Panel Header — centered title with minimize / maximize controls */}
@@ -1574,7 +1730,7 @@ export default function TeachingPage() {
                                 initial={isMobile ? { opacity: 0 } : { opacity: 0, flex: '0 0 0px' }}
                                 animate={isMobile ? { opacity: mobilePanel === 'teach' ? 1 : 0 } : {
                                     opacity: (rightMaximized || chatMaximized) ? 0 : 1,
-                                    flex: (rightMaximized || chatMaximized) ? '0 0 0px' : (centerMaximized ? '1 1 100%' : (rightPanelVisible ? '55 55 0%' : '75 75 0%')),
+                                    flex: panelFlex(rightMaximized || chatMaximized, centerMaximized, rightPanelVisible ? '55 55 0%' : '75 75 0%'),
                                     borderRadius: centerMaximized ? 0 : 20,
                                     boxShadow: centerMaximized ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
                                 }}
@@ -1588,9 +1744,9 @@ export default function TeachingPage() {
                                     background: 'var(--teaching-panel-bg)',
                                     overflow: 'hidden',
                                     position: 'relative',
-                                    height: '100%',
-                                    minHeight: 0,
+                                    height: isStacked ? 'auto' : '100%',
                                     alignSelf: 'stretch',
+                                    ...stackedPanelStyle,
                                 }}
                             >
                                 {/* Panel Header — minimal when maximized for distraction-free focus */}
@@ -1920,7 +2076,7 @@ export default function TeachingPage() {
                                 >
                                     <ChevronRight className="w-5 h-5 shrink-0" />
                                 </button>
-                                <span className="text-xs text-gray-500 dark:text-gray-400 writing-mode-vertical rotate-180 mt-2 whitespace-nowrap">Teaching</span>
+                                <span className="text-xs text-gray-500 dark:text-gray-400 writing-mode-vertical mt-2 whitespace-nowrap font-bold uppercase tracking-widest">Teaching</span>
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -1934,7 +2090,7 @@ export default function TeachingPage() {
                                 initial={isMobile ? { opacity: 0 } : { opacity: 0, flex: '0 0 0px' }}
                                 animate={isMobile ? { opacity: mobilePanel === 'studio' ? 1 : 0 } : { 
                                     opacity: (centerMaximized || chatMaximized) ? 0 : 1,
-                                    flex: (centerMaximized || chatMaximized) ? '0 0 0px' : (rightMaximized ? '1 1 100%' : (centerPanelVisible ? '22 22 0%' : '75 75 0%')),
+                                    flex: panelFlex(centerMaximized || chatMaximized, rightMaximized, centerPanelVisible ? '22 22 0%' : '75 75 0%'),
                                     borderRadius: rightMaximized ? 0 : 20,
                                     boxShadow: rightMaximized ? 'none' : 'var(--teaching-panel-shadow)',
                                 }}
@@ -1947,8 +2103,8 @@ export default function TeachingPage() {
                                 } : {
                                     background: 'var(--teaching-panel-bg)',
                                     overflow: 'hidden',
-                                    minHeight: 0,
                                     alignSelf: 'stretch',
+                                    ...stackedPanelStyle,
                                 }}
                             >
                                 {/* Panel Header — centered title; relative so maximize button positions correctly */}
@@ -1995,7 +2151,7 @@ export default function TeachingPage() {
                                 </div>
 
                                 {/* Sidebar tools list or Viewer */}
-                                <div className="flex-1 flex flex-col min-h-0 bg-[#fcfcfc] dark:bg-slate-950/20">
+                                <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[var(--teaching-panel-bg-alt)] dark:bg-slate-950/20">
                                     {studioInViewer ? (
                                         // Active Viewer Mode - Full Panel
                                         <div className="flex-1 flex flex-col min-h-0">
@@ -2013,181 +2169,86 @@ export default function TeachingPage() {
                                                         {activeStudioTab === 'notes' ? 'Notes' :
                                                             activeStudioTab === 'map' ? 'Mind Map' :
                                                                 activeStudioTab === 'flashcards' ? 'Flashcards' :
-                                                                    activeStudioTab === 'quiz' ? 'Quiz' : 
-                                                                        activeStudioTab === 'analyzer' ? 'AI Analyzer' : 'Summary'}
+                                                                    activeStudioTab === 'quiz' ? 'Quiz' : 'Summary'}
                                                     </span>
                                                 </div>
                                             </div>
 
-                                            {/* Viewer Content */}
-                                            <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+                                            {/* Viewer Content — scroll only inside the tool viewer, keep footers reachable */}
+                                            <div className="flex-1 min-h-0 overflow-hidden flex flex-col p-0 sm:p-0">
                                                 <Suspense fallback={<div className="flex h-full items-center justify-center p-8"><Loader2 className="w-8 h-8 animate-spin text-purple-500" /></div>}>
                                                     {activeStudioTab === 'notes' && sessionNotes.length > 0 && (
-                                                        <NotesViewer note={sessionNotes[sessionNotes.length - 1]} />
+                                                        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+                                                            <NotesViewer note={sessionNotes[sessionNotes.length - 1]} />
+                                                        </div>
                                                     )}
                                                     {activeStudioTab === 'map' && sessionMindMaps.length > 0 && (
-                                                        <MindMapViewer mindMap={sessionMindMaps[sessionMindMaps.length - 1]} />
+                                                        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+                                                            <MindMapViewer mindMap={sessionMindMaps[sessionMindMaps.length - 1]} />
+                                                        </div>
                                                     )}
                                                     {activeStudioTab === 'flashcards' && sessionFlashcards.length > 0 && (
-                                                        <FlashcardViewer flashcards={sessionFlashcards} onPerformanceUpdate={updateFlashcardPerformance} />
+                                                        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+                                                            <FlashcardViewer flashcards={sessionFlashcards} onPerformanceUpdate={updateFlashcardPerformance} />
+                                                        </div>
                                                     )}
                                                     {activeStudioTab === 'quiz' && (
-                                                        <QuizViewer
-                                                            topic={currentSession?.topicName || 'General'}
-                                                            subjectArea={topicInfo.subjectArea || 'General'}
-                                                            gradeLevel={topicInfo.gradeLevel || 'School'}
-                                                            topicDescription={topicInfo.topicDescription}
-                                                            chapterName={topicInfo.chapterName}
-                                                            subjectDescription={topicInfo.subjectDescription}
-                                                            lessonContent={currentSession?.teachingSteps?.map(s => s.content || '').filter(Boolean) || []}
-                                                            onBack={() => setStudioInViewer(false)}
-                                                            onComplete={(score: number) => {
-                                                                setCompletedQuizCount(prev => prev + 1);
-                                                                // Log full studio quiz to analytics
-                                                                addSession({
-                                                                    sessionId: `studio_quiz_${Date.now()}`,
-                                                                    date: new Date().toISOString(),
-                                                                    durationMinutes: Math.max(1, Math.round((Date.now() - sessionStartTime) / 60000)),
-                                                                    topicId: topicId || 'unknown',
-                                                                    completionPercentage: 100,
-                                                                    doubtsCount: currentSession?.doubts?.length || 0,
-                                                                    quizScore: score
-                                                                });
-                                                            }}
-                                                        />
+                                                        // Absolute fill pins the viewer to the panel box, so its sticky
+                                                        // footer (Next / Finish) can never be pushed out of view.
+                                                        <div className="relative flex-1 min-h-0">
+                                                          <div className="absolute inset-0 flex flex-col">
+                                                            <QuizViewer
+                                                                topic={currentSession?.topicName || 'General'}
+                                                                subjectArea={topicInfo.subjectArea || 'General'}
+                                                                gradeLevel={topicInfo.gradeLevel || 'School'}
+                                                                topicDescription={topicInfo.topicDescription}
+                                                                chapterName={topicInfo.chapterName}
+                                                                subjectDescription={topicInfo.subjectDescription}
+                                                                lessonContent={currentSession?.teachingSteps?.map(s => s.content || '').filter(Boolean) || []}
+                                                                onBack={() => setStudioInViewer(false)}
+                                                                onProgress={setQuizProgress}
+                                                                onComplete={(score: number) => {
+                                                                    setCompletedQuizCount(prev => prev + 1);
+                                                                    setLastQuizScore(score);
+                                                                    // Log full studio quiz to analytics
+                                                                    addSession({
+                                                                        sessionId: `studio_quiz_${Date.now()}`,
+                                                                        date: new Date().toISOString(),
+                                                                        durationMinutes: Math.max(1, Math.round((Date.now() - sessionStartTime) / 60000)),
+                                                                        topicId: topicId || 'unknown',
+                                                                        completionPercentage: 100,
+                                                                        doubtsCount: currentSession?.doubts?.length || 0,
+                                                                        quizScore: score
+                                                                    });
+                                                                }}
+                                                            />
+                                                          </div>
+                                                        </div>
                                                     )}
                                                     {activeStudioTab === 'summary' && sessionSummaries.length > 0 && (
-                                                        <SummaryViewer summary={sessionSummaries[sessionSummaries.length - 1]} />
-                                                    )}
-                                                    {activeStudioTab === 'analyzer' && (
-                                                        <AnalyzerViewer />
+                                                        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+                                                            <SummaryViewer summary={sessionSummaries[sessionSummaries.length - 1]} />
+                                                        </div>
                                                     )}
                                                 </Suspense>
                                             </div>
                                         </div>
                                     ) : (
-                                        // Standard Tools Selection Mode
-                                        <>
-                                            <div className="flex-1 overflow-y-auto space-y-3" style={{ padding: 'clamp(12px, 2vw, var(--space-lg))', background: 'var(--teaching-panel-bg-alt)' }}>
-                                                {[
-                                                    { id: 'notes', icon: FileText, label: 'Notes', count: sessionNotes.length.toString().padStart(2, '0'), color: '#8E7CC3' },
-                                                    { id: 'map', icon: LucideMap, label: 'Mind Map', count: sessionMindMaps.length.toString().padStart(2, '0'), color: '#10B981' },
-                                                    { id: 'flashcards', icon: CreditCard, label: 'Flashcards', count: sessionFlashcards.length.toString().padStart(2, '0'), color: '#F59E0B' },
-                                                    { id: 'quiz', icon: HelpCircle, label: 'Quiz', count: completedQuizCount.toString().padStart(2, '0'), color: '#EC4899' },
-                                                    { id: 'summary', icon: Sparkles, label: 'Summary', count: sessionSummaries.length.toString().padStart(2, '0'), color: '#3B82F6' },
-                                                    { id: 'analyzer', icon: Scan, label: 'AI Analyzer', count: analyzedImage ? '01' : '00', color: '#10B981' },
-                                                ].map((tool) => {
-                                                    const isActive = activeStudioTab === tool.id;
-                                                    return (
-                                                        <motion.button
-                                                            key={tool.id}
-                                                            onClick={() => {
-                                                                setActiveStudioTab(tool.id as StudioTabId);
-                                                                if (tool.id === 'quiz') setStudioInViewer(true);
-                                                            }}
-                                                            whileHover={{
-                                                                backgroundColor: isActive ? 'transparent' : `${tool.color}15`,
-                                                                scale: 1.01
-                                                            }}
-                                                            className={`w-full h-12 sm:h-[52px] flex items-center justify-between px-3 sm:px-5 rounded-xl transition-all duration-300 relative group overflow-hidden ${isActive ? 'bg-transparent border-transparent' : 'bg-white/40 dark:bg-slate-800/40 border border-black/5 dark:border-white/5'}`}
-                                                        >
-                                                            {/* Active background highlight with glassmorphism */}
-                                                            {isActive && (
-                                                                <motion.div
-                                                                    layoutId="activeTabBg"
-                                                                    className="absolute inset-0 z-0 bg-white/60 dark:bg-slate-800/60 backdrop-blur-md"
-                                                                    style={{
-                                                                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-                                                                        border: '1px solid rgba(142, 124, 195, 0.2)'
-                                                                    }}
-                                                                />
-                                                            )}
-
-                                                            <div className="flex items-center gap-3 relative z-10">
-                                                                <div
-                                                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isActive ? 'bg-white dark:bg-slate-800 shadow-sm' : 'bg-gray-100/50 dark:bg-slate-800/50'}`}
-                                                                >
-                                                                    <tool.icon className="w-4 h-4" style={{ color: isActive ? tool.color : 'var(--teaching-panel-text-muted)' }} />
-                                                                </div>
-                                                                <span
-                                                                    className="text-[14px] font-bold tracking-tight transition-colors"
-                                                                    style={{ color: isActive ? 'var(--teaching-panel-text)' : 'var(--teaching-panel-text-muted)' }}
-                                                                >
-                                                                    {tool.label}
-                                                                </span>
-                                                            </div>
-
-                                                            <div className="flex items-center gap-2 relative z-10">
-                                                                {isActive && (
-                                                                    <motion.div
-                                                                        initial={{ scale: 0 }}
-                                                                        animate={{ scale: 1 }}
-                                                                        className="w-1.5 h-1.5 rounded-full"
-                                                                        style={{ backgroundColor: tool.color }}
-                                                                    />
-                                                                )}
-                                                            </div>
-                                                        </motion.button>
-                                                    );
-                                                })}
-
-                                                {/* Empty State for Summary if not yet generated */}
-                                                {activeStudioTab === 'summary' && sessionSummaries.length === 0 && !isGeneratingSummary && (
-                                                    <div className="flex flex-col items-center justify-center py-12 text-center">
-                                                        <div className="w-16 h-16 bg-blue-50 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-                                                            <Sparkles className="w-8 h-8 text-blue-500" />
-                                                        </div>
-                                                        <h4 className="text-gray-800 dark:text-slate-100 font-bold mb-2">No Summary Yet</h4>
-                                                        <p className="text-gray-500 dark:text-slate-400 text-sm max-w-[200px] mb-6">
-                                                            Generate an executive summary of your learning session.
-                                                        </p>
-                                                        <button
-                                                            onClick={handleGenerateSummary}
-                                                            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-200 dark:shadow-none"
-                                                        >
-                                                            Generate Summary
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Standard Footer with Generate button */}
-                                            <div className="p-4 sm:p-6 space-y-2 border-t" style={{ background: 'var(--teaching-panel-bg)', borderColor: 'var(--teaching-panel-divider)' }}>
-                                                <button
-                                                    onClick={() => {
-                                                        if (activeStudioTab === 'notes') handleGenerateNotes();
-                                                        else if (activeStudioTab === 'map') handleGenerateMindMap();
-                                                        else if (activeStudioTab === 'flashcards') handleGenerateFlashcards();
-                                                        else if (activeStudioTab === 'summary') handleGenerateSummary();
-                                                        else if (activeStudioTab === 'analyzer') setStudioInViewer(true);
-                                                    }}
-                                                    disabled={isGeneratingNotes || isGeneratingMindMap || isGeneratingFlashcards || isGeneratingSummary || isAnalyzing}
-                                                    className="w-full h-[52px] rounded-2xl flex items-center justify-center gap-3 text-[15px] font-medium text-white transition-all active:scale-95 disabled:opacity-50 hover:opacity-95"
-                                                    style={{ backgroundColor: 'var(--teaching-accent)', marginTop: 'var(--space-md)' }}
-                                                >
-                                                    {isGeneratingNotes || isGeneratingMindMap || isGeneratingFlashcards || isGeneratingSummary || isAnalyzing ? (
-                                                        <>
-                                                            <Loader2 className="w-5 h-5 animate-spin shrink-0" />
-                                                            <span>{isAnalyzing ? 'Analyzing...' : 'Generating...'}</span>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <Sparkles className="w-5 h-5 shrink-0" />
-                                                            <span>
-                                                                {activeStudioTab === 'notes' ? 'Generate Detailed Notes' :
-                                                                    activeStudioTab === 'map' ? 'Generate Mind Map' :
-                                                                        activeStudioTab === 'flashcards' ? 'Generate Flashcards' :
-                                                                            activeStudioTab === 'analyzer' ? 'Open AI Analyzer' :
-                                                                                'Generate Session Summary'}
-                                                            </span>
-                                                        </>
-                                                    )}
-                                                </button>
-                                                <p className="text-[13px] text-center font-normal leading-relaxed px-4 mt-2" style={{ color: 'var(--teaching-panel-text-muted)' }}>
-                                                    Auto-generated notes will appear here as you learn.
-                                                </p>
-                                            </div>
-                                        </>
+                                        <StudioPanel
+                                            tools={studioTools}
+                                            featuredTool={studioFeaturedTool}
+                                            activeToolId={activeStudioTab}
+                                            onToolClick={handleStudioToolClick}
+                                            onGenerateNotes={() => { void handleGenerateNotes(); }}
+                                            onFeaturedCta={() => {
+                                                setActiveStudioTab('quiz');
+                                                setStudioInViewer(true);
+                                            }}
+                                            onLearnMoreNotes={handleStudioLearnMoreNotes}
+                                            notesStatus={notesGenerateStatus}
+                                            notesGeneratedCount={sessionNotes.length}
+                                            wide={rightMaximized}
+                                        />
                                     )}
                                 </div>
                             </motion.div>
@@ -2214,7 +2275,7 @@ export default function TeachingPage() {
                                 >
                                     <ChevronLeft className="w-5 h-5" />
                                 </button>
-                                <span className="text-xs text-gray-500 dark:text-slate-400 writing-mode-vertical rotate-180 mt-2 font-bold uppercase tracking-widest whitespace-nowrap">Studio</span>
+                                <span className="text-xs text-gray-500 dark:text-slate-400 writing-mode-vertical mt-2 font-bold uppercase tracking-widest whitespace-nowrap">Studio</span>
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -2261,7 +2322,10 @@ export default function TeachingPage() {
                 </div>
             )}
             {activeModal === 'profile' && (
-                <div className="fixed inset-0 z-[200] bg-white dark:bg-slate-950 overflow-y-auto w-full h-full flex flex-col">
+                <div
+                    className="fixed inset-0 z-[200] bg-white dark:bg-slate-950 overflow-y-auto overscroll-contain w-full h-full flex flex-col"
+                    style={{ WebkitOverflowScrolling: 'touch' }}
+                >
                     <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-purple-600" /></div>}>
                         <ProfilePage onClose={() => setActiveModal('none')} />
                     </Suspense>

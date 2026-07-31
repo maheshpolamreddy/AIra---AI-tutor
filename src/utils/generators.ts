@@ -1,4 +1,5 @@
-import type { GeneratedNote, MindMap, MindMapNode, Flashcard, GeneratedSummary } from '../types';
+import type { GeneratedNote, MindMap, MindMapNode, Flashcard, GeneratedSummary, NotesGenerationContext } from '../types';
+import { buildFallbackDiagram } from './notesGeneration';
 
 /**
  * MOCK GENERATORS
@@ -7,23 +8,37 @@ import type { GeneratedNote, MindMap, MindMapNode, Flashcard, GeneratedSummary }
 
 // ─── NOTES ──────────────────────────────────────────────────────────────────
 
-export const generateMockNotes = (sessionId: string, topicName: string, content: string[]): GeneratedNote => {
+export const generateMockNotes = (
+    sessionId: string,
+    topicName: string,
+    content: string[],
+    context: NotesGenerationContext = {},
+): GeneratedNote => {
     const fullContent = content.join('\n\n');
     const sentences = fullContent.split(/[.!?]+/).filter(s => s.trim().length > 20);
-    const keyConcepts = extractKeyConcepts(fullContent, topicName);
+    const keyConcepts = [
+        ...(context.keyConcepts || []),
+        ...extractKeyConcepts(fullContent, topicName),
+    ].filter((v, i, a) => a.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i).slice(0, 8);
     const mainPoints = extractMainPoints(fullContent, sentences);
-    const sections = generateNoteSections(topicName, fullContent, keyConcepts, mainPoints);
+    const subject = context.subjectArea || 'this subject';
+    const grade = context.gradeLevel || 'your level';
+    const chapter = context.chapterName;
+    const sections = generateNoteSections(topicName, fullContent, keyConcepts, mainPoints, subject, grade, chapter);
 
     return {
         id: `note_${Date.now()}`,
         sessionId,
         topicName,
-        title: `${topicName} - Comprehensive Study Notes`,
+        title: `${topicName} — Detailed Study Notes`,
         content: fullContent,
-        sections: sections,
+        sections,
         userDoubts: [],
         createdAt: new Date().toISOString(),
         qualityScore: calculateQualityScore(sections, fullContent),
+        subjectArea: context.subjectArea,
+        gradeLevel: context.gradeLevel,
+        chapterName: context.chapterName,
     };
 };
 
@@ -38,71 +53,117 @@ function extractKeyConcepts(content: string, topicName: string): string[] {
 }
 
 function extractMainPoints(_content: string, sentences: string[]): string[] {
-    const keyIndicators = ['important', 'key', 'essential', 'critical', 'fundamental', 'main', 'primary', 'significant'];
+    const keyIndicators = ['important', 'key', 'essential', 'critical', 'fundamental', 'main', 'primary', 'significant', 'because', 'means', 'defined'];
     return sentences
         .filter(s => {
             const lower = s.toLowerCase();
             return keyIndicators.some(indicator => lower.includes(indicator)) ||
-                (s.length > 50 && s.length < 200);
+                (s.length > 50 && s.length < 220);
         })
-        .slice(0, 10)
+        .slice(0, 12)
         .map(s => s.trim());
 }
 
-function generateNoteSections(topicName: string, _content: string, keyConcepts: string[], mainPoints: string[]): GeneratedNote['sections'] {
-    const sections: GeneratedNote['sections'] = [];
+function generateNoteSections(
+    topicName: string,
+    _content: string,
+    keyConcepts: string[],
+    mainPoints: string[],
+    subject: string,
+    grade: string,
+    chapter?: string,
+): GeneratedNote['sections'] {
+    const snippet = (i: number, fallback: string) => mainPoints[i] || fallback;
+    const conceptList = keyConcepts.length
+        ? keyConcepts.map(c => `**${c}**`).join(', ')
+        : `the core ideas in **${topicName}**`;
+    const chapterLine = chapter ? ` (chapter: ${chapter})` : '';
 
-    sections.push({
-        heading: 'Introduction & Overview',
-        content: `This comprehensive guide covers ${topicName}, providing you with essential knowledge and practical insights. ${mainPoints[0] || `Understanding ${topicName} is fundamental to mastering this subject area.`}`,
-        highlights: [
-            `Core topic: ${topicName}`,
-            keyConcepts[0] || 'Fundamental concepts',
-            'Practical applications'
-        ],
-    });
+    const overviewDiagram = buildFallbackDiagram(topicName, keyConcepts);
 
-    if (keyConcepts.length > 0) {
-        sections.push({
+    return [
+        {
+            heading: 'Introduction & Learning Goals',
+            content: `These notes are for **${topicName}** in ${subject} at ${grade}${chapterLine}.\n\n${snippet(0, `You will learn what ${topicName} means, why it matters in ${subject}, and how to use it correctly.`)}\n\nStay grounded in the lesson: every section below is built from the teaching content for this topic.`,
+            highlights: [
+                `Topic focus: ${topicName}`,
+                `Subject: ${subject}`,
+                chapter ? `Chapter: ${chapter}` : `Level: ${grade}`,
+            ].filter(Boolean),
+            diagrams: [overviewDiagram],
+        },
+        {
             heading: 'Key Concepts & Definitions',
-            content: `The main concepts in ${topicName} include: ${keyConcepts.slice(0, 5).join(', ')}. Each of these plays a crucial role in understanding the broader topic. ${mainPoints[1] || `These concepts form the foundation of ${topicName}.`}`,
-            highlights: keyConcepts.slice(0, 5).map(c => `${c}: Essential concept`),
-        });
-    }
-
-    if (mainPoints.length > 2) {
-        sections.push({
+            content: `The essential vocabulary for **${topicName}** includes ${conceptList}.\n\n${snippet(1, `Learn each definition carefully — exam questions usually test precise language, not vague summaries.`)}\n\n${snippet(2, `Connect each concept back to ${topicName} instead of memorizing isolated words.`)}`,
+            highlights: keyConcepts.slice(0, 6).map(c => `${c}: core idea in ${topicName}`),
+        },
+        {
             heading: 'Detailed Explanation',
-            content: `${mainPoints[2] || `Let's explore ${topicName} in detail.`} ${mainPoints[3] || `Understanding these details is crucial for practical application.`} ${mainPoints[4] || `This knowledge will help you apply these concepts effectively.`}`,
-            highlights: ['In-depth understanding required', 'Practical application focus', 'Real-world relevance'],
-        });
-    }
-
-    sections.push({
-        heading: 'Applications & Real-World Examples',
-        content: `${topicName} has numerous practical applications. ${mainPoints[5] || `These concepts are used in various professional settings.`} Understanding how to apply this knowledge is essential for success.`,
-        highlights: ['Professional applications', 'Real-world scenarios', 'Practical implementation'],
-    });
-
-    sections.push({
-        heading: 'Key Takeaways & Summary',
-        content: `To master ${topicName}, remember: ${mainPoints[6] || `Focus on understanding the core principles.`} ${mainPoints[7] || `Practice applying these concepts regularly.`} These takeaways will help you succeed in this subject area.`,
-        highlights: ['Master core principles', 'Regular practice essential', 'Apply knowledge actively'],
-    });
-
-    return sections;
+            content: `${snippet(2, `Let's unpack ${topicName} step by step.`)}\n\n${snippet(3, `Pay attention to cause-and-effect and the order of ideas — that is where most marks come from.`)}\n\n${snippet(4, `If a diagram appears in class, reconstruct it from memory using the figure in these notes.`)}`,
+            highlights: [
+                `Explain ${topicName} in your own words`,
+                'Track mechanism / sequence, not just labels',
+                'Link back to definitions above',
+            ],
+            diagrams: keyConcepts.length >= 2
+                ? [{
+                    type: 'process' as const,
+                    title: `How to reason about ${topicName}`,
+                    caption: 'A practical sequence for studying and answering questions on this topic.',
+                    nodes: [
+                        { id: 'p1', label: 'Define', detail: topicName.slice(0, 28) },
+                        { id: 'p2', label: 'Break down', detail: keyConcepts[0]?.slice(0, 28) },
+                        { id: 'p3', label: 'Relate', detail: keyConcepts[1]?.slice(0, 28) },
+                        { id: 'p4', label: 'Apply', detail: 'Example / problem' },
+                    ],
+                    edges: [
+                        { from: 'p1', to: 'p2' },
+                        { from: 'p2', to: 'p3' },
+                        { from: 'p3', to: 'p4' },
+                    ],
+                }]
+                : undefined,
+        },
+        {
+            heading: 'Examples & Applications',
+            content: `${snippet(5, `Apply ${topicName} to a concrete situation from the lesson.`)}\n\n${snippet(6, `Write one short worked example: given → method → answer → why it works.`)}\n\nPrefer examples that appear in your ${subject} curriculum rather than generic workplace advice.`,
+            highlights: [
+                `Worked example for ${topicName}`,
+                'Show the method, not only the final answer',
+                'Name which concept each step uses',
+            ],
+        },
+        {
+            heading: 'Common Mistakes & Quick Checks',
+            content: `Students often confuse parts of **${topicName}** or skip a required condition.\n\n${snippet(7, `Before finishing an answer, check definitions, units/conditions, and whether you answered the exact question asked.`)}\n\nUse the checklist in Key Takeaways as a pre-exam drill.`,
+            highlights: [
+                'Do not swap similar terms',
+                'State assumptions / conditions',
+                'Re-read the question stem carefully',
+            ],
+        },
+        {
+            heading: 'Key Takeaways & Revision Checklist',
+            content: `To revise **${topicName}**:\n\n- Restate the definition without looking\n- Redraw any diagram from memory\n- Solve one short problem or give one example\n- Explain the idea aloud in under a minute\n\n${snippet(8, `Regular, short practice beats one long cram session.`)}`,
+            highlights: [
+                `Master the definition of ${topicName}`,
+                'Redraw the concept diagram',
+                'Complete one practice check',
+            ],
+        },
+    ];
 }
 
 function calculateQualityScore(sections: GeneratedNote['sections'], content: string): number {
-    let score = 70;
+    let score = 72;
     const length = content.trim().length;
-    if (length >= 500) score += 8;
-    if (length >= 1200) score += 7;
-    if (sections.length >= 4) score += 5;
-    if (sections.length >= 5) score += 5;
-    const totalHighlights = sections.reduce((sum, s) => sum + s.highlights.length, 0);
-    if (totalHighlights >= 10) score += 5;
-    return Math.min(100, score);
+    if (length >= 500) score += 6;
+    if (length >= 1200) score += 6;
+    if (sections.length >= 5) score += 6;
+    const diagramCount = sections.reduce((n, s) => n + (s.diagrams?.length || 0), 0);
+    if (diagramCount > 0) score += 5;
+    if (diagramCount > 1) score += 3;
+    return Math.min(95, score);
 }
 
 // ─── MIND MAP ────────────────────────────────────────────────────────────────

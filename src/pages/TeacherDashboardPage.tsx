@@ -2,30 +2,29 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  User, LogOut, RefreshCw, Sparkles,
+  LogOut, RefreshCw, Sparkles,
   BarChart3, Users, AlertTriangle, ChevronRight, ArrowLeft, Brain, Zap, GraduationCap
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useCurriculumStore } from '../stores/curriculumStore';
 import { getRoutesForRole, teacherRoutes } from '../utils/routes';
-import { redirectToLandingLogin } from '../lib/authSession';
+import { redirectAfterSignOut } from '../lib/authSession';
 import { schoolGrades } from '../data/schoolCurriculum';
 import PageTransition from '../components/common/PageTransition';
+import { UserAvatar } from '../components/common/UserAvatar';
 import Breadcrumbs from '../components/common/Breadcrumbs';
-import { toast } from '../stores/toastStore';
 import { MOCK_CLASS_PERFORMANCE, MOCK_STUDENTS, Student } from '../data/mockAnalytics';
 
 export default function TeacherDashboardPage() {
   const navigate = useNavigate();
-  const { logout, role } = useAuthStore();
+  const { logout, role, user } = useAuthStore();
   const routes = getRoutesForRole(role);
   const { selectedGrade, selectedSubject, setSelectedGrade, setSelectedSubject } = useCurriculumStore();
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
   const handleLogout = async () => {
     await logout();
-    toast.success('Logged out successfully');
-    redirectToLandingLogin('/teacher/dashboard');
+    redirectAfterSignOut(teacherRoutes.dashboard);
   };
 
   const handleSwitchRole = async () => {
@@ -34,7 +33,7 @@ export default function TeacherDashboardPage() {
       return;
     }
     await logout();
-    redirectToLandingLogin('/teacher/dashboard');
+    redirectAfterSignOut(teacherRoutes.dashboard);
   };
 
   const weakTopics = MOCK_CLASS_PERFORMANCE.filter(t => t.score < 60);
@@ -116,10 +115,15 @@ export default function TeacherDashboardPage() {
               <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
                 <Link
                   to={routes.profile}
-                  className="p-2 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-pink-600 dark:hover:text-pink-400 hover:bg-pink-50 dark:hover:bg-pink-900/20 rounded-xl transition-colors relative group"
+                  className="p-1.5 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:bg-pink-50 dark:hover:bg-pink-900/20 rounded-xl transition-colors relative group"
                   title="Profile"
                 >
-                  <User className="w-5 h-5" />
+                  <UserAvatar
+                    user={user}
+                    size={30}
+                    className="ring-1 ring-black/5 dark:ring-white/10"
+                    fallbackClassName="bg-gradient-to-br from-purple-500 to-pink-500"
+                  />
                   <span className="absolute -bottom-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-900 text-white text-[10px] font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Account</span>
                 </Link>
               </motion.div>

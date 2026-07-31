@@ -1,9 +1,11 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, FileText, Brain, Lightbulb, CheckCircle2, Loader2, RefreshCcw, BookOpen, Map as MapIcon, X } from 'lucide-react';
 import { useResourceStore } from '../../stores/resourceStore';
 import { useTeachingStore } from '../../stores/teachingStore';
 import { useShallow } from 'zustand/react/shallow';
+import { findTopicInfo } from '../../utils/topicUtils';
+import type { Topic } from '../../types';
 
 interface AnalyzerViewerProps {
     onNotesGenerated?: () => void;
@@ -37,6 +39,22 @@ export default function AnalyzerViewer({ onNotesGenerated, onMindMapUpdated }: A
     const { currentSession } = useTeachingStore(useShallow(state => ({
         currentSession: state.currentSession
     })));
+
+    const topicContext = useMemo(() => {
+        try {
+            const info = findTopicInfo(currentSession?.topicId ?? '');
+            const topic = info.topic as Topic | null;
+            return {
+                subjectArea: info.subjectName || undefined,
+                gradeLevel: info.streamName || undefined,
+                chapterName: info.chapterName,
+                topicDescription: topic?.description,
+                subjectDescription: info.subjectDescription,
+            };
+        } catch {
+            return {};
+        }
+    }, [currentSession?.topicId]);
 
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -86,16 +104,18 @@ export default function AnalyzerViewer({ onNotesGenerated, onMindMapUpdated }: A
         if (!analyzedImage || !currentSession) return;
         
         try {
-            // content for notes generation includes the OCR text and insights
             const content = [
-                `Title: Content from Analyzed Image`,
+                `Title: Content from Analyzed Image for ${currentSession.topicName}`,
                 `Visual Summary: ${analyzedImage.visualSummary}`,
                 `Key Concepts: ${analyzedImage.keyConcepts.join(', ')}`,
                 `Extracted Content:\n${analyzedImage.extractedContent}`,
-                `Insights: ${analyzedImage.learningInsights.join('. ')}`
+                `Insights: ${analyzedImage.learningInsights.join('. ')}`,
             ];
             
-            await generateNotes(currentSession.id, currentSession.topicName, content);
+            await generateNotes(currentSession.id, currentSession.topicName, content, {
+                ...topicContext,
+                keyConcepts: analyzedImage.keyConcepts,
+            });
             if (onNotesGenerated) onNotesGenerated();
         } catch (err) {
             console.error('Note generation failed:', err);
@@ -109,8 +129,8 @@ export default function AnalyzerViewer({ onNotesGenerated, onMindMapUpdated }: A
             await generateMindMap(
                 currentSession.id, 
                 currentSession.topicName, 
-                'General', 
-                'Senior Secondary',
+                topicContext.subjectArea || 'General', 
+                topicContext.gradeLevel || 'School',
                 analyzedImage.keyConcepts,
                 [analyzedImage.extractedContent]
             );

@@ -10,7 +10,7 @@ import ErrorBoundary from './components/common/ErrorBoundary';
 import FullPageLoader from './components/common/FullPageLoader';
 import ToastContainer from './components/common/Toast';
 import { useToastStore } from './stores/toastStore';
-import { getRoleFromPath, studentRoutes, teacherRoutes, adminRoutes } from './utils/routes';
+import { getRoleFromPath, teacherRoutes, adminRoutes } from './utils/routes';
 import type { AppRole } from './types';
 import ScrollToTop from './components/common/ScrollToTop';
 import { unlockAudioContext } from './hooks/useSpeech';
@@ -239,9 +239,9 @@ function RootRedirect() {
   useEffect(() => {
     if (!authReady) return;
     if (!isAuthenticated) {
-      redirectToLandingLogin('/student/mode-selection');
+      redirectToLandingLogin(homeForRole(role));
     }
-  }, [authReady, isAuthenticated]);
+  }, [authReady, isAuthenticated, role]);
 
   if (!authReady) return <FullPageLoader message="" />;
   if (!isAuthenticated) return <FullPageLoader message="Redirecting to sign in…" />;
@@ -270,7 +270,7 @@ function AppRoutes() {
         />
 
         {/* Student routes */}
-        <Route path="/student" element={<Navigate to={studentRoutes.modeSelection} replace />} />
+        <Route path="/student" element={<Navigate to={homeForRole('student')} replace />} />
         <Route
           path="/student/mode-selection"
           element={
@@ -465,7 +465,8 @@ function AppRoutes() {
 
 function LoginRedirect() {
   useEffect(() => {
-    redirectToLandingLogin('/student/mode-selection');
+    // Read once on mount: hydration has already settled by the time this renders.
+    redirectToLandingLogin(homeForRole(useAuthStore.getState().role));
   }, []);
   return <FullPageLoader message="Redirecting to sign in…" />;
 }

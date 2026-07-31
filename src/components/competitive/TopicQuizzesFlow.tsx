@@ -80,6 +80,16 @@ export default function TopicQuizzesFlow() {
         const newAnswers = [...userAnswers];
         newAnswers[currentQuestionIndex] = optionIndex;
         setUserAnswers(newAnswers);
+        // Picking an option locks the answer and reveals the explanation + Next,
+        // so there is no extra "Check" step between answering and moving on.
+        setShowExplanation(true);
+    };
+
+    /** Answered questions stay revealed when navigating back and forth. */
+    const goToQuestion = (index: number) => {
+        const clamped = Math.min(Math.max(index, 0), questions.length - 1);
+        setCurrentQuestionIndex(clamped);
+        setShowExplanation(userAnswers[clamped] !== undefined && userAnswers[clamped] !== -1);
     };
 
     const calculateScore = () => {
@@ -300,7 +310,7 @@ export default function TopicQuizzesFlow() {
                                 </button>
                                 <div className="min-w-0">
                                     <h3 className="font-bold text-gray-900 dark:text-white leading-tight truncate">{selectedChapter.name}</h3>
-                                    <p className="text-[10px] sm:text-xs text-slate-500">Question {currentQuestionIndex + 1} of 10</p>
+                                    <p className="text-[10px] sm:text-xs text-slate-500">Question {currentQuestionIndex + 1} of {questions.length}</p>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-bold border border-indigo-100 dark:border-indigo-800 flex-shrink-0">
@@ -314,7 +324,7 @@ export default function TopicQuizzesFlow() {
                         </div>
 
                         {/* Content */}
-                        <div className="flex-1 p-5 md:p-10 overflow-y-auto">
+                        <div className="flex-1 min-h-0 p-5 md:p-10 overflow-y-auto">
                             <div className="mb-8">
                                 <div className="inline-block px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-500 mb-4 tracking-wider uppercase">
                                     {questions[currentQuestionIndex].difficulty}
@@ -373,37 +383,28 @@ export default function TopicQuizzesFlow() {
                         </div>
 
                         {/* Footer Controls */}
-                        <div className="px-5 py-4 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center">
+                        <div className="shrink-0 px-5 py-4 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center gap-3">
                             <button
-                                onClick={() => setCurrentQuestionIndex(Math.max(0, currentQuestionIndex - 1))}
+                                onClick={() => goToQuestion(currentQuestionIndex - 1)}
                                 disabled={currentQuestionIndex === 0}
                                 className="px-4 py-2 rounded-xl font-bold text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-50 transition-colors text-sm"
                             >
                                 Previous
                             </button>
-                            
-                            {!showExplanation ? (
-                                <button
-                                    onClick={() => setShowExplanation(true)}
-                                    disabled={userAnswers[currentQuestionIndex] === -1}
-                                    className="px-5 py-2 rounded-xl font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 hover:bg-indigo-200 disabled:opacity-50 transition-colors text-sm"
-                                >
-                                    Check
-                                </button>
-                            ) : currentQuestionIndex === questions.length - 1 ? (
+
+                            {currentQuestionIndex === questions.length - 1 ? (
                                 <button
                                     onClick={() => setStep('result')}
-                                    className="px-6 py-2 rounded-xl font-bold bg-green-500 text-white hover:bg-green-600 shadow-md transition-colors text-sm"
+                                    disabled={!showExplanation}
+                                    className="px-6 py-2 rounded-xl font-bold bg-green-500 text-white hover:bg-green-600 shadow-md transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                     Finish
                                 </button>
                             ) : (
                                 <button
-                                    onClick={() => {
-                                        setShowExplanation(false);
-                                        setCurrentQuestionIndex(currentQuestionIndex + 1);
-                                    }}
-                                    className="px-6 py-2 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 shadow-md transition-colors flex items-center gap-2 text-sm"
+                                    onClick={() => goToQuestion(currentQuestionIndex + 1)}
+                                    disabled={!showExplanation}
+                                    className="px-6 py-2 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 shadow-md transition-colors flex items-center gap-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                     Next <ChevronRight className="w-4 h-4" />
                                 </button>

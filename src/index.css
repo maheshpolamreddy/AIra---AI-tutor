@@ -278,6 +278,46 @@
 /* LAYER: UTILITIES */
 @layer utilities {
 
+  /* Collapsed teaching-panel rail labels (Chat / Teaching / Studio) */
+  .writing-mode-vertical {
+    writing-mode: vertical-lr;
+    text-orientation: mixed;
+    transform: none;
+  }
+
+  /* Studio Panel redesign */
+  .studio-panel {
+    min-height: 0;
+  }
+
+  .studio-panel-scroll {
+    scroll-padding-top: 8px;
+    scroll-padding-bottom: 16px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .studio-progress-fill {
+    transition: width 400ms ease-out;
+  }
+
+  @keyframes studio-badge-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.72; }
+  }
+
+  .studio-badge-pulse {
+    animation: studio-badge-pulse 2s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .studio-progress-fill {
+      transition: none;
+    }
+    .studio-badge-pulse {
+      animation: none;
+    }
+  }
+
   /* Glass Morphism - Refined */
   .glass {
     background: rgba(255, 255, 255, 0.4);

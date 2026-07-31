@@ -13,9 +13,10 @@ import {
 import { useAnalyticsStore } from '../stores/analyticsStore';
 import PageTransition from '../components/common/PageTransition';
 import Breadcrumbs from '../components/common/Breadcrumbs';
+import { UserAvatar, displayNameForUser } from '../components/common/UserAvatar';
 import { toast } from '../stores/toastStore';
 import { getRoutesForRole, studentRoutes } from '../utils/routes';
-import { redirectToLandingLogin } from '../lib/authSession';
+import { redirectAfterSignOut } from '../lib/authSession';
 import ExamAnalyticsCard from '../components/dashboard/ExamAnalyticsCard';
 import { AɪraMascot, AchievementStar } from '../components/dashboard/DashboardVisuals';
 import { schoolGrades } from '../data/schoolCurriculum';
@@ -80,18 +81,17 @@ export default function DashboardPage() {
 
     const handleLogout = async () => {
         await logout();
-        toast.success('Security protocol active. Logged out.');
-        redirectToLandingLogin('/student/mode-selection');
+        redirectAfterSignOut(studentRoutes.modeSelection);
     };
 
     const handleSwitchRole = async () => {
-        toast.info('Switching mission profile...');
         if (import.meta.env.DEV) {
+            toast.info('Switching mission profile...');
             navigate('/dev/demo-roles');
             return;
         }
         await logout();
-        redirectToLandingLogin('/student/mode-selection');
+        redirectAfterSignOut(studentRoutes.modeSelection);
     };
 
     const handleStartTopic = (topicId: string) => {
@@ -193,10 +193,15 @@ export default function DashboardPage() {
                                 whileTap={{ scale: 0.9 }}
                                 type="button"
                                 onClick={() => navigate(routes.profile)}
-                                className="p-2 text-slate-500 dark:text-slate-400 hover:text-pink-600 dark:hover:text-pink-400 hover:bg-pink-50 dark:hover:bg-slate-800 rounded-xl transition-colors relative group"
-                                aria-label="Profile"
+                                className="p-1.5 text-slate-500 dark:text-slate-400 hover:bg-pink-50 dark:hover:bg-slate-800 rounded-xl transition-colors relative group"
+                                aria-label={`Account — ${displayNameForUser(user)}`}
                             >
-                                <User className="w-5 h-5 pointer-events-none" />
+                                <UserAvatar
+                                    user={user}
+                                    size={30}
+                                    className="pointer-events-none ring-1 ring-black/5 dark:ring-white/10"
+                                    fallbackClassName="bg-gradient-to-br from-purple-500 to-pink-500"
+                                />
                                 <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-900 text-white text-[10px] font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Account</span>
                             </motion.button>
 
@@ -665,9 +670,12 @@ export default function DashboardPage() {
                                         <span className="font-black text-sm text-white">Identity</span>
                                     </div>
                                     <div className="flex items-center gap-3 mb-4">
-                                        <div className="w-8 h-8 rounded-full bg-white/30 flex items-center justify-center text-[10px] font-bold text-white border border-white/20">
-                                            {(user?.displayName || user?.name || 'U')[0].toUpperCase()}
-                                        </div>
+                                        <UserAvatar
+                                            user={user}
+                                            size={32}
+                                            className="border border-white/20"
+                                            fallbackClassName="bg-white/30 text-[10px] font-bold"
+                                        />
                                         <div className="min-w-0">
                                             <p className="text-[10px] font-black text-white truncate">{user?.displayName || user?.name}</p>
                                             <p className="text-[8px] font-medium text-indigo-100 opacity-70 uppercase truncate">{profile?.profession?.name || 'Explorer'}</p>

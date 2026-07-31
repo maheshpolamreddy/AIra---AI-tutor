@@ -34,6 +34,8 @@ export interface LearningStyle {
     kinesthetic: number;
     preferredPace: 'slow' | 'normal' | 'fast';
     interactivityLevel: 'low' | 'medium' | 'high';
+    /** Set once the learner takes the style check; absent means the split is unmeasured. */
+    assessedAt?: string;
 }
 
 export interface LearningPreferences {
@@ -411,6 +413,38 @@ export interface Attachment {
 // RESOURCE TYPES
 // ============================================
 
+/** Structured study diagram embedded in a note section (rendered as SVG). */
+export type NoteDiagramType = 'process' | 'hierarchy' | 'cycle' | 'compare' | 'concept-map';
+
+export interface NoteDiagramNode {
+    id: string;
+    label: string;
+    detail?: string;
+}
+
+export interface NoteDiagramEdge {
+    from: string;
+    to: string;
+    label?: string;
+}
+
+export interface NoteDiagram {
+    type: NoteDiagramType;
+    title: string;
+    caption?: string;
+    nodes: NoteDiagramNode[];
+    edges?: NoteDiagramEdge[];
+}
+
+export interface NotesGenerationContext {
+    subjectArea?: string;
+    gradeLevel?: string;
+    chapterName?: string;
+    topicDescription?: string;
+    subjectDescription?: string;
+    keyConcepts?: string[];
+}
+
 export interface GeneratedNote {
     id: string;
     sessionId: string;
@@ -421,6 +455,10 @@ export interface GeneratedNote {
     userDoubts: string[];
     createdAt: string;
     qualityScore?: number;
+    /** Curriculum metadata captured at generation time. */
+    subjectArea?: string;
+    gradeLevel?: string;
+    chapterName?: string;
 }
 
 export interface GeneratedSummary {
@@ -436,8 +474,11 @@ export interface GeneratedSummary {
 
 export interface NoteSection {
     heading: string;
+    /** Plain text or light markdown (bold, lists, inline code). */
     content: string;
     highlights: string[];
+    /** Optional visual explanations grounded in the section content. */
+    diagrams?: NoteDiagram[];
 }
 
 export interface MindMapNode {

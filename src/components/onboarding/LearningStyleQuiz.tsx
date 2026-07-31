@@ -4,12 +4,14 @@ import { Brain, Ear, Eye, Hand, ArrowRight, LucideIcon } from 'lucide-react';
 import { useUserStore } from '../../stores/userStore';
 import type { LearningStyle } from '../../types';
 
+type StyleDimension = 'visual' | 'auditory' | 'kinesthetic';
+
 interface Question {
     id: number;
     text: string;
     options: {
         text: string;
-        type: keyof Omit<LearningStyle, 'preferredPace' | 'interactivityLevel'>;
+        type: StyleDimension;
         icon: LucideIcon;
     }[];
 }
@@ -64,9 +66,11 @@ const questions: Question[] = [
 
 interface Props {
     onComplete: () => void;
+    /** Label for the button shown after the results, e.g. "Back to profile". */
+    completeLabel?: string;
 }
 
-export default function LearningStyleQuiz({ onComplete }: Props) {
+export default function LearningStyleQuiz({ onComplete, completeLabel = 'Go to Dashboard' }: Props) {
     const { updateLearningStyle } = useUserStore();
     const [currentQuestion, setCurrentQuestion] = useState(0);
     const [scores, setScores] = useState({ visual: 0, auditory: 0, kinesthetic: 0 });
@@ -103,63 +107,51 @@ export default function LearningStyleQuiz({ onComplete }: Props) {
                 animate={{ opacity: 1, scale: 1 }}
                 className="max-w-md mx-auto text-center space-y-8"
             >
-                <div className="bg-white p-8 rounded-2xl shadow-xl space-y-6">
-                    <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto">
-                        <Brain className="w-8 h-8 text-purple-600" />
+                <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl shadow-xl space-y-6 border border-transparent dark:border-slate-800">
+                    <div className="w-16 h-16 bg-purple-100 dark:bg-purple-500/20 rounded-full flex items-center justify-center mx-auto">
+                        <Brain className="w-8 h-8 text-purple-600 dark:text-purple-300" />
                     </div>
 
-                    <h2 className="text-2xl font-bold text-gray-800">Assessment Complete!</h2>
-                    <p className="text-gray-600">Here is your learning profile breakdown:</p>
+                    <h2 className="text-2xl font-bold text-gray-800 dark:text-slate-100">Assessment Complete!</h2>
+                    <p className="text-gray-600 dark:text-slate-400">Here is your learning profile breakdown:</p>
 
                     <div className="space-y-4">
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-sm font-medium">
-                                <span className="flex items-center gap-2"><Eye className="w-4 h-4" /> Visual</span>
-                                <span>{Math.round((scores.visual / questions.length) * 100)}%</span>
-                            </div>
-                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${(scores.visual / questions.length) * 100}%` }}
-                                    className="h-full bg-blue-500"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-sm font-medium">
-                                <span className="flex items-center gap-2"><Ear className="w-4 h-4" /> Auditory</span>
-                                <span>{Math.round((scores.auditory / questions.length) * 100)}%</span>
-                            </div>
-                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${(scores.auditory / questions.length) * 100}%` }}
-                                    className="h-full bg-green-500"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-sm font-medium">
-                                <span className="flex items-center gap-2"><Hand className="w-4 h-4" /> Kinesthetic</span>
-                                <span>{Math.round((scores.kinesthetic / questions.length) * 100)}%</span>
-                            </div>
-                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${(scores.kinesthetic / questions.length) * 100}%` }}
-                                    className="h-full bg-orange-500"
-                                />
-                            </div>
-                        </div>
+                        {([
+                            { label: 'Visual', icon: Eye, value: scores.visual, bar: 'bg-blue-500' },
+                            { label: 'Auditory', icon: Ear, value: scores.auditory, bar: 'bg-green-500' },
+                            { label: 'Kinesthetic', icon: Hand, value: scores.kinesthetic, bar: 'bg-orange-500' },
+                        ] as const).map((row) => {
+                            const percent = Math.round((row.value / questions.length) * 100);
+                            return (
+                                <div key={row.label} className="space-y-2">
+                                    <div className="flex justify-between text-sm font-medium text-gray-700 dark:text-slate-300">
+                                        <span className="flex items-center gap-2"><row.icon className="w-4 h-4" /> {row.label}</span>
+                                        <span>{percent}%</span>
+                                    </div>
+                                    <div
+                                        className="h-2 bg-gray-100 dark:bg-slate-800 rounded-full overflow-hidden"
+                                        role="progressbar"
+                                        aria-label={`${row.label} learning preference`}
+                                        aria-valuenow={percent}
+                                        aria-valuemin={0}
+                                        aria-valuemax={100}
+                                    >
+                                        <motion.div
+                                            initial={{ width: 0 }}
+                                            animate={{ width: `${percent}%` }}
+                                            className={`h-full ${row.bar}`}
+                                        />
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
 
                     <button
                         onClick={onComplete}
-                        className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl font-bold hover:shadow-lg hover:scale-[1.02] transition-all flex items-center justify-center gap-2"
+                        className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl font-bold hover:shadow-lg hover:scale-[1.02] transition-all flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
                     >
-                        Go to Dashboard
+                        {completeLabel}
                         <ArrowRight className="w-4 h-4" />
                     </button>
                 </div>
@@ -172,8 +164,8 @@ export default function LearningStyleQuiz({ onComplete }: Props) {
     return (
         <div className="max-w-2xl mx-auto">
             <div className="mb-8 text-center">
-                <span className="text-sm font-bold text-purple-600 tracking-wider uppercase">Question {currentQuestion + 1} of {questions.length}</span>
-                <div className="h-1 w-full bg-gray-100 rounded-full mt-4 overflow-hidden">
+                <span className="text-sm font-bold text-purple-600 dark:text-purple-300 tracking-wider uppercase">Question {currentQuestion + 1} of {questions.length}</span>
+                <div className="h-1 w-full bg-gray-100 dark:bg-slate-800 rounded-full mt-4 overflow-hidden">
                     <motion.div
                         className="h-full bg-purple-600"
                         initial={{ width: `${(currentQuestion / questions.length) * 100}%` }}
@@ -190,21 +182,21 @@ export default function LearningStyleQuiz({ onComplete }: Props) {
                     exit={{ x: -20, opacity: 0 }}
                     className="space-y-8"
                 >
-                    <h2 className="text-2xl font-bold text-gray-800 text-center leading-relaxed">
+                    <h2 className="text-xl sm:text-2xl font-bold text-gray-800 dark:text-slate-100 text-center leading-relaxed">
                         {question.text}
                     </h2>
 
-                    <div className="grid gap-4">
+                    <div className="grid gap-3 sm:gap-4">
                         {question.options.map((option, idx) => (
                             <button
                                 key={idx}
                                 onClick={() => handleAnswer(option.type)}
-                                className="group p-4 bg-white border-2 border-transparent hover:border-purple-500 rounded-xl shadow-sm hover:shadow-md transition-all text-left flex items-center gap-4"
+                                className="group p-4 bg-white dark:bg-slate-900 border-2 border-transparent dark:border-slate-800 hover:border-purple-500 dark:hover:border-purple-500 rounded-xl shadow-sm hover:shadow-md transition-all text-left flex items-center gap-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
                             >
-                                <div className="w-12 h-12 bg-gray-50 group-hover:bg-purple-50 rounded-lg flex items-center justify-center transition-colors">
-                                    <option.icon className="w-6 h-6 text-gray-600 group-hover:text-purple-600" />
+                                <div className="w-12 h-12 shrink-0 bg-gray-50 dark:bg-slate-800 group-hover:bg-purple-50 dark:group-hover:bg-purple-500/20 rounded-lg flex items-center justify-center transition-colors">
+                                    <option.icon className="w-6 h-6 text-gray-600 dark:text-slate-300 group-hover:text-purple-600 dark:group-hover:text-purple-300" />
                                 </div>
-                                <span className="font-medium text-gray-700 group-hover:text-gray-900 text-lg">
+                                <span className="font-medium text-gray-700 dark:text-slate-200 group-hover:text-gray-900 dark:group-hover:text-white text-base sm:text-lg">
                                     {option.text}
                                 </span>
                             </button>

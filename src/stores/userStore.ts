@@ -25,10 +25,11 @@ interface UserStore {
     resetOnboarding: () => void;
 }
 
+/** Zeros mean "not measured yet" — only the style check may fill these in. */
 const defaultLearningStyle: LearningStyle = {
-    visual: 70,
-    auditory: 20,
-    kinesthetic: 10,
+    visual: 0,
+    auditory: 0,
+    kinesthetic: 0,
     preferredPace: 'normal',
     interactivityLevel: 'medium',
 };
@@ -41,6 +42,28 @@ const defaultLearningPreferences: LearningPreferences = {
     reviewStrategy: 'spaced_repetition',
 };
 
+function createDefaultProfile(): UserProfile {
+    return {
+        userId: 'user_' + Date.now(),
+        name: 'User',
+        email: '',
+        displayName: 'User',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        profession: null,
+        subProfession: null,
+        experienceLevel: 'beginner',
+        verificationStatus: 'none',
+        learningStyle: defaultLearningStyle,
+        learningPreferences: defaultLearningPreferences,
+        learningGoals: [],
+        weeklyCommitmentHours: 5,
+        totalLearningHours: 0,
+        topicsCompleted: 0,
+        currentStreak: 0,
+        longestStreak: 0,
+    };
+}
+
 export const useUserStore = create<UserStore>()(
     persist(
         (set) => ({
@@ -51,8 +74,9 @@ export const useUserStore = create<UserStore>()(
 
             setProfile: (profile) => set({ profile }),
 
+            // Edits can happen before onboarding ever runs, so seed a profile rather than dropping them.
             updateProfile: (updates) => set((state) => ({
-                profile: state.profile ? { ...state.profile, ...updates } : null,
+                profile: { ...(state.profile ?? createDefaultProfile()), ...updates },
             })),
 
             setOnboardingStep: (step) => set({ onboardingStep: step }),
@@ -66,12 +90,19 @@ export const useUserStore = create<UserStore>()(
                 selectedSubProfession: subProfession
             }),
 
-            updateLearningStyle: (style) => set((state) => ({
-                profile: state.profile ? {
-                    ...state.profile,
-                    learningStyle: { ...state.profile.learningStyle, ...style },
-                } : null,
-            })),
+            updateLearningStyle: (style) => set((state) => {
+                const profile = state.profile ?? createDefaultProfile();
+                return {
+                    profile: {
+                        ...profile,
+                        learningStyle: {
+                            ...profile.learningStyle,
+                            ...style,
+                            assessedAt: new Date().toISOString(),
+                        },
+                    },
+                };
+            }),
 
             updateLearningPreferences: (prefs) => set((state) => ({
                 profile: state.profile ? {
@@ -99,39 +130,14 @@ export const useUserStore = create<UserStore>()(
                 profile: state.profile ? { ...state.profile, memories: [] } : null
             })),
 
-            completeOnboarding: () => set((state) => {
-                if (!state.profile) {
-                    // Create initial profile
-                    const newProfile: UserProfile = {
-                        userId: 'user_' + Date.now(),
-                        name: 'User',
-                        email: '',
-                        displayName: 'User',
-                        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                        profession: state.selectedProfession,
-                        subProfession: state.selectedSubProfession,
-                        experienceLevel: 'beginner',
-                        verificationStatus: 'none',
-                        learningStyle: defaultLearningStyle,
-                        learningPreferences: defaultLearningPreferences,
-                        learningGoals: [],
-                        weeklyCommitmentHours: 5,
-                        totalLearningHours: 0,
-                        topicsCompleted: 0,
-                        currentStreak: 0,
-                        longestStreak: 0,
-                    };
-                    return { profile: newProfile, onboardingStep: -1 };
-                }
-                return {
-                    profile: {
-                        ...state.profile,
-                        profession: state.selectedProfession,
-                        subProfession: state.selectedSubProfession,
-                    },
-                    onboardingStep: -1
-                };
-            }),
+            completeOnboarding: () => set((state) => ({
+                profile: {
+                    ...(state.profile ?? createDefaultProfile()),
+                    profession: state.selectedProfession,
+                    subProfession: state.selectedSubProfession,
+                },
+                onboardingStep: -1,
+            })),
 
             resetOnboarding: () => set({
                 onboardingStep: 0,

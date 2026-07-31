@@ -14,6 +14,7 @@ import { studentRoutes } from '../utils/routes';
 import PageTransition from '../components/common/PageTransition';
 import AiraLogo from '../components/brand/AiraLogo';
 import { useSettingsStore } from '../stores/settingsStore';
+import { writeStudentHomeHint } from '../lib/sessionHints';
 
 type ModeAccent = 'curriculum' | 'competitive';
 
@@ -268,6 +269,9 @@ export default function StudentModeSelectionPage({
     (mode: ModeAccent, path: string) => {
       if (selecting) return;
       setSelecting(mode);
+      // Remembered so the next sign-in lands here directly instead of
+      // asking for the same choice again.
+      writeStudentHomeHint(path);
       const delay = reduceMotion ? 0 : 420;
       window.setTimeout(() => navigate(path), delay);
     },

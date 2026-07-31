@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Check, X, RotateCcw, ChevronLeft, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { aiService } from '../../services/aiService';
@@ -14,6 +14,8 @@ interface QuizViewerProps {
     subjectDescription?: string;
     lessonContent?: string[];
     onComplete?: (score: number) => void;
+    /** Live progress for the Studio panel: how many of the generated questions are answered. */
+    onProgress?: (progress: { answered: number; total: number }) => void;
     onBack?: () => void;
 }
 
@@ -408,6 +410,7 @@ export default function QuizViewer({
     subjectDescription,
     lessonContent = [],
     onComplete,
+    onProgress,
     onBack,
 }: QuizViewerProps) {
     const [questions, setQuestions] = useState<Question[]>([]);
@@ -505,6 +508,21 @@ export default function QuizViewer({
 
     const currentQuestion = questions[currentQuestionIndex];
 
+    const answeredCount = useMemo(
+        () => userAnswers.reduce((acc: number, answer) => acc + (answer !== null ? 1 : 0), 0),
+        [userAnswers],
+    );
+
+    // Ref keeps the effect stable when the parent passes a new callback each render.
+    const onProgressRef = useRef(onProgress);
+    onProgressRef.current = onProgress;
+
+    useEffect(() => {
+        onProgressRef.current?.({ answered: answeredCount, total: questions.length });
+    }, [answeredCount, questions.length]);
+
+    const scrollRef = useRef<HTMLDivElement>(null);
+
     const handleOptionClick = (index: number) => {
         if (isAnswered || !currentQuestion) return;
         setSelectedOption(index);
@@ -513,6 +531,11 @@ export default function QuizViewer({
         newAnswers[currentQuestionIndex] = index;
         setUserAnswers(newAnswers);
         if (index === currentQuestion.correctAnswer) setScore(prev => prev + 1);
+        // Bring the explanation into view so the answer and the Next button read as one step.
+        requestAnimationFrame(() => {
+            const el = scrollRef.current;
+            if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        });
     };
 
     const handleNext = () => {
@@ -543,6 +566,13 @@ export default function QuizViewer({
     const tier = getGradeTier(gradeNum);
     const tierColor = tier === 'primary' ? '#10b981' : tier === 'middle' ? '#3b82f6' : tier === 'secondary' ? '#8b5cf6' : '#f59e0b';
     const tierLabel = tier === 'primary' ? 'Beginner' : tier === 'middle' ? 'Intermediate' : tier === 'secondary' ? 'Advanced' : 'Expert';
+    // Static classes (not inline styles) so the fill can never be dropped by a `background`
+    // shorthand collision and leave white text on a transparent button.
+    const tierButtonClass =
+        tier === 'primary' ? 'bg-emerald-500 hover:bg-emerald-600'
+        : tier === 'middle' ? 'bg-blue-500 hover:bg-blue-600'
+        : tier === 'secondary' ? 'bg-violet-500 hover:bg-violet-600'
+        : 'bg-amber-500 hover:bg-amber-600';
 
     if (isLoading) {
         return (
@@ -662,8 +692,8 @@ export default function QuizViewer({
     }
 
     return (
-        <div className="flex flex-col h-full bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
-            <div className="p-4 border-b border-gray-100 dark:border-slate-700 flex justify-between items-center bg-gray-50 dark:bg-slate-800 gap-2 flex-wrap">
+        <div className="flex flex-col h-full min-h-0 flex-1 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+            <div className="shrink-0 p-4 border-b border-gray-100 dark:border-slate-700 flex justify-between items-center bg-gray-50 dark:bg-slate-800 gap-2 flex-wrap">
                 <div className="flex items-center gap-2 min-w-0">
                     {onBack && (
                         <button type="button" onClick={onBack} className="p-1 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-full transition-colors mr-1 shrink-0">
@@ -692,12 +722,12 @@ export default function QuizViewer({
             </div>
 
             {loadError && (
-                <div className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-100 dark:border-amber-800/50 text-xs text-amber-700 dark:text-amber-200">
+                <div className="shrink-0 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-100 dark:border-amber-800/50 text-xs text-amber-700 dark:text-amber-200">
                     ⚠️ {loadError}
                 </div>
             )}
 
-            <div className="flex-1 p-4 overflow-y-auto">
+            <div ref={scrollRef} className="flex-1 min-h-0 p-4 overflow-y-auto custom-scrollbar">
                 <div className="flex items-center gap-2 mb-4">
                     <span className="text-xs px-2 py-0.5 rounded-full font-semibold text-white" style={{ background: tierColor }}>{tierLabel}</span>
                     <span className="text-xs text-gray-400 truncate">{subjectArea}{chapterName ? ` · ${chapterName}` : ''}</span>
@@ -706,7 +736,7 @@ export default function QuizViewer({
                 <div className="w-full h-1.5 bg-gray-100 dark:bg-slate-800 rounded-full mb-4 overflow-hidden">
                     <motion.div className="h-full rounded-full" style={{ background: tierColor }}
                         initial={{ width: 0 }}
-                        animate={{ width: `${((currentQuestionIndex) / questions.length) * 100}%` }}
+                        animate={{ width: `${questions.length ? (answeredCount / questions.length) * 100 : 0}%` }}
                         transition={{ duration: 0.3 }} />
                 </div>
                 <AnimatePresence mode="wait">
@@ -749,11 +779,12 @@ export default function QuizViewer({
                 </AnimatePresence>
             </div>
 
-            <div className="p-3 border-t border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center justify-between gap-3">
-                <span className="text-xs text-gray-400">{score} correct so far</span>
+            <div className="shrink-0 z-10 p-3 border-t border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-[0_-4px_12px_rgba(15,23,42,0.06)] flex items-center justify-between gap-3">
+                <span className="text-xs text-gray-400 truncate">
+                    {isAnswered ? `${score} correct so far` : 'Pick an answer to continue'}
+                </span>
                 <button type="button" onClick={handleNext} disabled={!isAnswered}
-                    className="px-5 py-2 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 shadow-sm"
-                    style={{ background: isAnswered ? tierColor : undefined, backgroundColor: !isAnswered ? '#94a3b8' : undefined }}>
+                    className={`shrink-0 px-5 py-2.5 text-white rounded-xl font-semibold text-sm transition-colors disabled:cursor-not-allowed shadow-sm ${isAnswered ? tierButtonClass : 'bg-slate-400 hover:bg-slate-400'}`}>
                     {currentQuestionIndex === questions.length - 1 ? 'Finish Quiz ✓' : 'Next →'}
                 </button>
             </div>

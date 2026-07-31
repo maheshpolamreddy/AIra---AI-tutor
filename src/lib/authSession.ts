@@ -3,16 +3,21 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { db } from './firebase';
 import type { AppRole, User } from '../types';
 import { studentRoutes, teacherRoutes, adminRoutes } from '../utils/routes';
+import { readStudentHomeHint } from './sessionHints';
 
 export function normalizeAppRole(role: unknown): AppRole {
     if (role === 'teacher' || role === 'admin') return role;
     return 'student';
 }
 
+/**
+ * Students who already picked a mode go straight back to it instead of
+ * repeating the mode picker on every sign-in.
+ */
 export function homeForRole(role: AppRole | null): string {
     if (role === 'teacher') return teacherRoutes.dashboard;
     if (role === 'admin') return adminRoutes.dashboard;
-    return studentRoutes.modeSelection;
+    return readStudentHomeHint() ?? studentRoutes.modeSelection;
 }
 
 export async function fetchUserAppRole(uid: string): Promise<AppRole> {
@@ -46,15 +51,26 @@ export function mapFirebaseUser(fb: FirebaseUser): User {
 
 const PROD_LANDING = 'https://aira-landing-page-elite.vercel.app';
 
+export interface LandingLoginOptions {
+    /**
+     * Marks the navigation as following an explicit sign-out. The landing login
+     * page uses this to clear its own Firebase session and to stay on the form
+     * instead of auto-continuing back into the app — which matters because the
+     * tutor can run on a different origin, where its sign-out cannot reach the
+     * session the landing app persisted.
+     */
+    signedOut?: boolean;
+}
+
 /**
  * Landing login URL.
  * - Same-origin (landing host + rewrites): relative `/login?...`
  * - Tutor standalone (:5173 or ai-ra-app.vercel.app): absolute landing origin
  */
-export function getLandingLoginUrl(returnPath: string): string {
+export function getLandingLoginUrl(returnPath: string, options: LandingLoginOptions = {}): string {
     const configured = (import.meta.env.VITE_LANDING_ORIGIN as string | undefined)?.replace(/\/$/, '') ?? '';
-    const redirect = encodeURIComponent(returnPath || '/student/mode-selection');
-    const path = `/login?redirect=${redirect}`;
+    const redirect = encodeURIComponent(returnPath || homeForRole('student'));
+    const path = `/login?redirect=${redirect}${options.signedOut ? '&signedOut=1' : ''}`;
 
     if (configured) return `${configured}${path}`;
 
@@ -77,6 +93,14 @@ export function getLandingLoginUrl(returnPath: string): string {
     return path;
 }
 
-export function redirectToLandingLogin(returnPath: string): void {
-    window.location.assign(getLandingLoginUrl(returnPath));
+export function redirectToLandingLogin(
+    returnPath: string,
+    options: LandingLoginOptions = {},
+): void {
+    window.location.assign(getLandingLoginUrl(returnPath, options));
+}
+
+/** Use after `authStore.logout()` so the user lands on the sign-in form. */
+export function redirectAfterSignOut(returnPath: string): void {
+    redirectToLandingLogin(returnPath, { signedOut: true });
 }
