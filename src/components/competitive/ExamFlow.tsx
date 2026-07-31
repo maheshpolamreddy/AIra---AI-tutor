@@ -1,21 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight, ArrowLeft, FileText, Brain, Target, CheckCircle, XCircle, RefreshCw, Trophy, Sparkles, Calendar, BrainCircuit, Clock } from 'lucide-react';
+import { ChevronRight, ArrowLeft, FileText, Brain, Target, CheckCircle, XCircle, RefreshCw, Trophy, Calendar, BrainCircuit, Clock, Sparkles } from 'lucide-react';
 import { COMPETITIVE_EXAMS, Exam, ExamSubject, Paper } from '../../data/mockData';
 import { useNavigate } from 'react-router-dom';
 import { Question } from '../../data/competitiveQuestions';
 import { aiExamGenerator } from '../../services/aiExamGenerator';
-import { EXAM_THEMES, EXAM_IMAGES } from '../../data/examThemes';
+import { EXAM_THEMES } from '../../data/examThemes';
+import ExamCard from './ExamCard';
+import LiveExamPanel from './LiveExamPanel';
+import { useCompetitiveStore } from '../../stores/competitiveStore';
 
 
 interface ExamFlowProps {
     isDashboardView?: boolean;
     onExamStateChange?: (isActive: boolean) => void;
-    flowType?: 'standard' | 'pyq';
+    flowType?: 'standard' | 'pyq' | 'mock';
 }
 
 export default function ExamFlow({ isDashboardView = false, onExamStateChange, flowType = 'standard' }: ExamFlowProps = {}) {
     const navigate = useNavigate();
+    const recordAttempt = useCompetitiveStore((s) => s.recordAttempt);
+    const recordedRef = useRef(false);
     const [step, setStep] = useState<'exam' | 'subject' | 'paper' | 'solving' | 'result'>('exam');
     const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
     const [selectedSubject, setSelectedSubject] = useState<ExamSubject | null>(null);
@@ -29,9 +34,14 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
     // Real Exam Interface Status Tracking
     const [visitedQuestions, setVisitedQuestions] = useState<boolean[]>([]);
     const [markedForReview, setMarkedForReview] = useState<boolean[]>([]);
+    const [bookmarked, setBookmarked] = useState<boolean[]>([]);
+    const [eliminated, setEliminated] = useState<Record<number, number[]>>({});
+    const [notes, setNotes] = useState<Record<number, string>>({});
 
     const [showExplanation, setShowExplanation] = useState(false);
-    const [timer, setTimer] = useState(0); // Seconds
+    /** Remaining seconds while solving (countdown). Also stores elapsed on result. */
+    const [timer, setTimer] = useState(0);
+    const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const [isGenerating, setIsGenerating] = useState(false);
 
     // Hook to inform parent (CompetitiveDashboard) when we enter/exit exam mode
@@ -41,21 +51,100 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
         }
     }, [step, onExamStateChange]);
 
-    // Timer Effect
+    // Countdown timer — auto-submit at zero
     useEffect(() => {
-        let interval: NodeJS.Timeout;
-        if (step === 'solving') {
-            interval = setInterval(() => setTimer((prev: number) => prev + 1), 1000);
-        }
+        if (step !== 'solving') return;
+        const interval = setInterval(() => {
+            setElapsedSeconds((e) => e + 1);
+            setTimer((prev) => {
+                if (prev <= 1) {
+                    clearInterval(interval);
+                    queueMicrotask(() => setStep('result'));
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
         return () => clearInterval(interval);
     }, [step]);
+
+    // Autosave draft progress while solving
+    useEffect(() => {
+        if (step !== 'solving' || !selectedExam || !selectedSubject) return;
+        try {
+            sessionStorage.setItem(
+                'aira-exam-draft',
+                JSON.stringify({
+                    examId: selectedExam.id,
+                    subjectId: selectedSubject.id,
+                    currentQuestionIndex,
+                    userAnswers,
+                    markedForReview,
+                    bookmarked,
+                    notes,
+                    timer,
+                    savedAt: Date.now(),
+                }),
+            );
+        } catch {
+            /* ignore quota */
+        }
+    }, [
+        step,
+        selectedExam,
+        selectedSubject,
+        currentQuestionIndex,
+        userAnswers,
+        markedForReview,
+        bookmarked,
+        notes,
+        timer,
+    ]);
+
+    // Persist attempt once when results open
+    useEffect(() => {
+        if (step !== 'result' || !selectedExam || !selectedSubject || recordedRef.current) return;
+        if (!questions.length) return;
+        recordedRef.current = true;
+        let score = 0;
+        userAnswers.forEach((ans, idx) => {
+            if (questions[idx] && ans === questions[idx].correctAnswer) score += 1;
+        });
+        recordAttempt({
+            examId: selectedExam.id,
+            examName: selectedExam.name,
+            subjectId: selectedSubject.id,
+            subjectName: selectedSubject.name,
+            mode: flowType === 'pyq' ? 'pyq' : flowType === 'mock' ? 'mock' : 'standard',
+            score,
+            total: questions.length,
+            timeSeconds: elapsedSeconds || Math.max(0, (selectedExam.timeMinutes * 60) - timer),
+            paperYear: selectedPaper ? String(selectedPaper.year) : undefined,
+        });
+        try {
+            sessionStorage.removeItem('aira-exam-draft');
+        } catch {
+            /* ignore */
+        }
+    }, [
+        step,
+        selectedExam,
+        selectedSubject,
+        selectedPaper,
+        questions,
+        userAnswers,
+        elapsedSeconds,
+        timer,
+        flowType,
+        recordAttempt,
+    ]);
 
     const handleBack = () => {
         if (step === 'result') {
             setStep(flowType === 'pyq' ? 'paper' : 'subject');
             resetExam();
         } else if (step === 'solving') {
-            const confirmQuit = window.confirm("Are you sure you want to quit the exam? Progress will be lost.");
+            const confirmQuit = window.confirm('Leave the exam? Your draft is auto-saved for this browser tab.');
             if (confirmQuit) {
                 setStep(flowType === 'pyq' ? 'paper' : 'subject');
                 resetExam();
@@ -69,8 +158,13 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
         setUserAnswers([]);
         setVisitedQuestions([]);
         setMarkedForReview([]);
+        setBookmarked([]);
+        setEliminated({});
+        setNotes({});
         setShowExplanation(false);
         setTimer(0);
+        setElapsedSeconds(0);
+        recordedRef.current = false;
     };
 
     const handleExamSelect = (exam: Exam) => {
@@ -83,13 +177,24 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
         return String(exam.papers?.[0]?.year ?? new Date().getFullYear() - 1);
     };
 
-    const applyQuestionsAndStartSolving = (finalQuestions: Question[]) => {
+    const applyQuestionsAndStartSolving = (finalQuestions: Question[], exam: Exam) => {
         setQuestions(finalQuestions);
         setUserAnswers(new Array(finalQuestions.length).fill(-1));
         const initialVisited = new Array(finalQuestions.length).fill(false);
         if (finalQuestions.length > 0) initialVisited[0] = true;
         setVisitedQuestions(initialVisited);
         setMarkedForReview(new Array(finalQuestions.length).fill(false));
+        setBookmarked(new Array(finalQuestions.length).fill(false));
+        setEliminated({});
+        setNotes({});
+        setElapsedSeconds(0);
+        recordedRef.current = false;
+        // Subject-scoped time: proportional share of full paper, minimum 20 minutes
+        const share = Math.max(
+            20 * 60,
+            Math.round((exam.timeMinutes * 60 * (finalQuestions.length || 1)) / Math.max(1, exam.subjects.reduce((s, sub) => s + sub.questionsCount, 0))),
+        );
+        setTimer(share);
         setStep('solving');
     };
 
@@ -98,16 +203,20 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
         setIsGenerating(true);
         try {
             const year = resolveExamYear(exam, paperOverride !== undefined ? paperOverride : selectedPaper);
+            const count =
+                flowType === 'mock'
+                    ? Math.min(subject.questionsCount, Math.max(15, Math.round(subject.questionsCount * 0.6)))
+                    : subject.questionsCount;
             const finalQuestions = await aiExamGenerator.generateAIExamPaper({
                 examId: exam.id,
                 examName: exam.name,
                 subjectId: subject.id,
                 subjectName: subject.name,
-                count: subject.questionsCount,
+                count,
                 examYear: year,
                 mode: flowType === 'pyq' ? 'pyq' : 'mock',
             });
-            applyQuestionsAndStartSolving(finalQuestions);
+            applyQuestionsAndStartSolving(finalQuestions, exam);
         } catch (error) {
             console.error('Failed to generate exam questions:', error);
         } finally {
@@ -173,9 +282,36 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
 
         if (currentQuestionIndex < questions.length - 1) {
             navigateToQuestion(currentQuestionIndex + 1);
-        } else {
-            setStep('result');
         }
+    };
+
+    const handlePrevious = () => {
+        if (currentQuestionIndex > 0) navigateToQuestion(currentQuestionIndex - 1);
+    };
+
+    const handleToggleEliminate = (optionIndex: number) => {
+        setEliminated((prev) => {
+            const current = prev[currentQuestionIndex] || [];
+            const next = current.includes(optionIndex)
+                ? current.filter((i) => i !== optionIndex)
+                : [...current, optionIndex];
+            return { ...prev, [currentQuestionIndex]: next };
+        });
+        if (userAnswers[currentQuestionIndex] === optionIndex) {
+            handleClearResponse();
+        }
+    };
+
+    const handleToggleBookmark = () => {
+        setBookmarked((prev) => {
+            const next = [...prev];
+            next[currentQuestionIndex] = !next[currentQuestionIndex];
+            return next;
+        });
+    };
+
+    const handleNoteChange = (text: string) => {
+        setNotes((prev) => ({ ...prev, [currentQuestionIndex]: text }));
     };
 
     const formatTime = (seconds: number) => {
@@ -224,7 +360,8 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                 )}
             </AnimatePresence>
 
-            {/* Header / Breadcrumbs */}
+            {/* Header / Breadcrumbs — hidden during live exam for immersion */}
+            {step !== 'solving' && (
             <div className="flex items-center justify-between gap-3 mb-8 p-1.5 bg-white/50 dark:bg-slate-900/30 backdrop-blur-md rounded-2xl border border-white/20 dark:border-slate-800/50 shadow-sm overflow-x-auto no-scrollbar">
                 <div className="flex items-center gap-3">
                     {(step !== 'exam') && (
@@ -257,7 +394,7 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                         {selectedPaper && (
                             <>
                                 <ChevronRight className="w-3 h-3 text-gray-300" />
-                                <span className={`text-[10px] font-black uppercase tracking-widest ${step === 'solving' || step === 'result' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`}>{selectedPaper.year}</span>
+                                <span className={`text-[10px] font-black uppercase tracking-widest ${step === 'result' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`}>{selectedPaper.year}</span>
                             </>
                         )}
     
@@ -289,6 +426,7 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                     </div>
                 )}
             </div>
+            )}
 
             {/* Content Display */}
             <div className="relative">
@@ -301,87 +439,28 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                         exit={{ opacity: 0, y: -30 }}
                     >
                         <div className="mb-8 hidden lg:block">
-                            <h2 className="text-4xl font-black text-gray-900 dark:text-white tracking-tighter mb-2">Available Exams</h2>
-                            <p className="text-lg text-slate-500 dark:text-slate-400 font-medium">Choose your target competitive examination to start practicing.</p>
+                            <h2 className="text-4xl font-black text-gray-900 dark:text-white tracking-tighter mb-2">
+                                {flowType === 'mock' ? 'Full-length mocks' : flowType === 'pyq' ? 'Previous year papers' : 'Available exams'}
+                            </h2>
+                            <p className="text-lg text-slate-500 dark:text-slate-400 font-medium">
+                                {flowType === 'mock'
+                                    ? 'Timed simulation papers with exam-style pressure and negative marking.'
+                                    : flowType === 'pyq'
+                                      ? 'Authentic year-tagged papers to master recurring patterns.'
+                                      : 'Choose your target examination — each card carries a distinct identity and syllabus path.'}
+                            </p>
                         </div>
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
-                            {COMPETITIVE_EXAMS.map((exam, i) => {
-                                const theme = EXAM_THEMES[exam.id] || EXAM_THEMES['gate'];
-                                const bgImageUrl = EXAM_IMAGES[exam.id] || EXAM_IMAGES['gate'];
-
-
-                                return (
-                                    <motion.div
-                                        key={exam.id}
-                                        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                                        transition={{ delay: i * 0.1, type: 'spring', damping: 20 }}
-                                        className="h-full"
-                                    >
-                                        <button
-                                            onClick={() => handleExamSelect(exam)}
-                                            className="w-full h-full relative overflow-hidden group rounded-[2.5rem] bg-white dark:bg-slate-900 text-left transition-all duration-500 shadow-lg hover:shadow-2xl flex flex-col min-h-[280px] sm:min-h-[320px] border-4 border-transparent"
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.borderColor = `${theme.color}30`;
-                                                e.currentTarget.style.transform = 'translateY(-10px) scale(1.02)';
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.borderColor = 'transparent';
-                                                e.currentTarget.style.transform = 'translateY(0) scale(1)';
-                                            }}
-                                        >
-                                            {/* Background Image Layer */}
-                                            <div className="absolute inset-0 w-full h-full overflow-hidden">
-                                                <div 
-                                                    className="absolute inset-0 bg-cover bg-center transition-transform duration-1000 group-hover:scale-110"
-                                                    style={{ backgroundImage: `url(${bgImageUrl})` }}
-                                                />
-                                                <div 
-                                                    className="absolute inset-0 opacity-60 dark:opacity-80 transition-all duration-500 group-hover:opacity-40"
-                                                    style={{ 
-                                                        background: `linear-gradient(135deg, ${theme.color}aa 0%, ${theme.color}77 40%, transparent 100%), linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 60%)` 
-                                                    }}
-                                                />
-                                            </div>
-
-                                            <div className="relative z-10 flex flex-col h-full p-8">
-                                                <div className="flex items-start justify-between mb-auto">
-                                                    <div
-                                                        className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-2xl transform group-hover:-rotate-12 transition-all duration-500 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl"
-                                                        style={{ color: theme.color }}
-                                                    >
-                                                        {React.cloneElement(theme.icon as React.ReactElement, { className: 'w-10 h-10' })}
-                                                    </div>
-                                                    <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center group-hover:bg-white transition-all shadow-xl group-hover:scale-125">
-                                                        <ChevronRight className="w-6 h-6 text-white group-hover:text-gray-900 transition-colors" />
-                                                    </div>
-                                                </div>
-
-                                                <div className="pt-8 text-white">
-                                                    <div className="flex gap-2 mb-4">
-                                                        <span className="px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-[10px] font-black uppercase tracking-widest border border-white/20">
-                                                            {exam.subjects.length} Subjects
-                                                        </span>
-                                                        <span className="px-3 py-1 bg-black/20 backdrop-blur-md rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10">
-                                                            Adaptive Learning
-                                                        </span>
-                                                    </div>
-                                                    <h3 className="font-black text-3xl sm:text-4xl tracking-tight mb-2 group-hover:translate-x-2 transition-transform duration-300 drop-shadow-2xl">
-                                                        {exam.name}
-                                                    </h3>
-                                                    <div className="flex items-center gap-2 opacity-90 group-hover:opacity-100 group-hover:translate-x-2 transition-all delay-75">
-                                                        <Target className="w-4 h-4" />
-                                                        <span className="text-xs font-bold uppercase tracking-widest">
-                                                            Target Score: {exam.id === 'neet' ? '720' : exam.id === 'nmms' ? '120' : exam.id === 'olympiad' ? '80' : exam.id === 'rgukt-iiit' ? '85' : '300'}+
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </button>
-                                    </motion.div>
-                                );
-                            })}
+                            {COMPETITIVE_EXAMS.map((exam, i) => (
+                                <ExamCard
+                                    key={exam.id}
+                                    exam={exam}
+                                    index={i}
+                                    badge={flowType === 'mock' ? 'Mock' : flowType === 'pyq' ? 'PYQ' : undefined}
+                                    onSelect={handleExamSelect}
+                                />
+                            ))}
                         </div>
                     </motion.div>
                 )}
@@ -579,230 +658,38 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                     </motion.div>
                 )}
 
-                {/* Step 5: Problem Solving */}
-                {step === 'solving' && questions.length > 0 && (
+                {/* Step 5: Live examination panel */}
+                {step === 'solving' && questions.length > 0 && selectedExam && selectedSubject && (
                     <motion.div
                         key="solving"
-                        initial={{ opacity: 0, scale: 0.98 }}
+                        initial={{ opacity: 0, scale: 0.985 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.98 }}
-                        className="flex flex-col lg:flex-row gap-6 w-full max-w-full"
+                        exit={{ opacity: 0, scale: 0.985 }}
                     >
-                        {/* Main Question Area */}
-                        <div className="flex-1 rounded-[2.5rem] border border-white/60 dark:border-slate-700/50 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] relative overflow-hidden bg-white/80 dark:bg-slate-900/80 backdrop-blur-3xl flex flex-col min-h-[450px] sm:min-h-[600px] h-full">
-                            
-                            {/* Top Progress Bar */}
-                            <div className="absolute top-0 left-0 w-full h-1.5 bg-slate-100 dark:bg-slate-800 z-10">
-                                <motion.div
-                                    className={`h-full bg-gradient-to-r ${selectedExam ? EXAM_THEMES[selectedExam.id].gradient : 'from-indigo-500 to-purple-600'}`}
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${((currentQuestionIndex + 1) / questions.length) * 100}%` }}
-                                    transition={{ ease: "easeInOut", duration: 0.5 }}
-                                />
-                            </div>
-
-                            <div className="p-4 sm:p-8 md:p-12 flex-1 flex flex-col pt-8">
-                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8 pb-4 sm:pb-6 border-b border-slate-200/60 dark:border-slate-800/60">
-                                    <div className="flex items-center gap-2 sm:gap-3">
-                                        <div className="px-3 sm:px-4 py-1.5 rounded-xl text-white text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] shadow-md"
-                                            style={{ background: selectedExam ? `linear-gradient(to right, ${EXAM_THEMES[selectedExam.id].color}, ${EXAM_THEMES[selectedExam.id].color}dd)` : '#6366f1' }}>
-                                            Q{currentQuestionIndex + 1}
-                                        </div>
-                                        <div className="px-2 sm:px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.1em] border border-slate-200 dark:border-slate-700">
-                                            {questions[currentQuestionIndex].difficulty}
-                                        </div>
-                                        {questions[currentQuestionIndex].questionFormat && (
-                                            <div
-                                                className="hidden sm:block max-w-[200px] truncate px-2 sm:px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-[8px] sm:text-[9px] font-bold uppercase tracking-[0.08em] border border-indigo-200/80 dark:border-indigo-800/60"
-                                                title={questions[currentQuestionIndex].questionFormat.replace(/_/g, ' ')}
-                                            >
-                                                {questions[currentQuestionIndex].questionFormat.replace(/_/g, ' ')}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[10px] sm:text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Marks:</span>
-                                        <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg text-[10px] sm:text-xs font-black">+4</span>
-                                        <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg text-[10px] sm:text-xs font-black">-1</span>
-                                    </div>
-                                </div>
-
-                                <div className="mb-6 sm:mb-10">
-                                    <h3 className="text-lg sm:text-2xl lg:text-3xl font-black text-gray-900 dark:text-white leading-[1.3] sm:leading-[1.4] tracking-tight break-words">
-                                        {questions[currentQuestionIndex].text}
-                                    </h3>
-                                </div>
-
-                                <div className="grid grid-cols-1 gap-3 sm:gap-4 mb-8 sm:mb-12">
-                                    {questions[currentQuestionIndex].options.map((option: string, idx: number) => {
-                                        const isSelected = userAnswers[currentQuestionIndex] === idx;
-                                        const theme = selectedExam ? EXAM_THEMES[selectedExam.id] : EXAM_THEMES['gate'];
-                                        
-                                        return (
-                                            <motion.button
-                                                key={idx}
-                                                onClick={() => handleAnswerSelect(idx)}
-                                                className={`w-full p-4 sm:p-5 rounded-2xl border-2 text-left transition-all relative overflow-hidden group flex items-center gap-3 sm:gap-4 ${isSelected
-                                                    ? 'shadow-md border-transparent text-gray-900 dark:text-white'
-                                                    : 'border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-800/30 hover:bg-white dark:hover:bg-slate-800 text-gray-700 dark:text-slate-300'
-                                                    }`}
-                                                style={{
-                                                    borderColor: isSelected ? theme.color : '',
-                                                    backgroundColor: isSelected ? theme.bgColor : '',
-                                                }}
-                                                whileHover={{ scale: 1.01 }}
-                                                whileTap={{ scale: 0.99 }}
-                                            >
-                                                <div className={`shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-xl border-2 flex items-center justify-center text-xs sm:text-sm font-black transition-all ${isSelected
-                                                    ? `border-transparent text-white shadow-md`
-                                                    : 'border-slate-300 dark:border-slate-600 text-slate-400 group-hover:border-slate-400'
-                                                    }`}
-                                                    style={{
-                                                        background: isSelected ? theme.gradient : 'transparent',
-                                                    }}
-                                                >
-                                                    {String.fromCharCode(65 + idx)}
-                                                </div>
-                                                <span className="text-sm sm:text-lg font-bold leading-snug flex-1 break-words">
-                                                    {option}
-                                                </span>
-                                            </motion.button>
-                                        );
-                                    })}
-                                </div>
-
-                                {/* Action Buttons Panel (Footer) */}
-                                <div className="mt-auto pt-6 flex flex-col sm:flex-row gap-4 items-center justify-between border-t border-slate-200/60 dark:border-slate-800/60">
-                                    <div className="flex gap-3 w-full sm:w-auto">
-                                        <button
-                                            onClick={handleMarkAndNext}
-                                            className="flex-1 sm:flex-none px-4 sm:px-6 py-3 rounded-xl bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-900/50 font-black text-[10px] tracking-wide transition-colors"
-                                        >
-                                            Mark for Review
-                                        </button>
-                                        <button
-                                            onClick={handleClearResponse}
-                                            className="flex-1 sm:flex-none px-4 sm:px-6 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 font-bold text-[10px] tracking-wide transition-colors"
-                                        >
-                                            Clear
-                                        </button>
-                                    </div>
-                                    <button
-                                        onClick={handleSaveAndNext}
-                                        className="w-full sm:w-auto px-8 py-3.5 rounded-xl text-white font-black text-xs sm:text-sm tracking-widest uppercase transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5"
-                                        style={{ background: selectedExam ? `linear-gradient(to right, ${EXAM_THEMES[selectedExam.id].color}, ${EXAM_THEMES[selectedExam.id].color}dd)` : '#6366f1' }}
-                                    >
-                                        Save & Next
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Question Palette Sidebar */}
-                        <div className="w-full lg:w-[280px] xl:w-[320px] shrink-0 rounded-[2.5rem] border border-white/60 dark:border-slate-700/50 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] bg-white/90 dark:bg-slate-900/90 backdrop-blur-3xl p-5 sm:p-6 flex flex-col min-h-min lg:h-auto">
-                            
-                            {/* Timer Block */}
-                            <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-800 p-4 rounded-2xl mb-6 shadow-inner border border-slate-200/50 dark:border-slate-700/50">
-                                <div className="flex items-center gap-3">
-                                    <Clock className="w-5 h-5 text-slate-400 animate-pulse" />
-                                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Time Left</span>
-                                </div>
-                                <span className="text-lg sm:text-xl font-black font-mono tracking-tighter text-gray-900 dark:text-white">
-                                    {formatTime(timer)}
-                                </span>
-                            </div>
-
-                            <div className="flex-1 lg:overflow-y-auto lg:pr-1 custom-scrollbar">
-                                <div className="mb-4">
-                                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-4 px-2">Question Palette</h4>
-                                    
-                                    <div className="grid grid-cols-5 sm:grid-cols-6 lg:grid-cols-5 gap-2">
-                                        {questions.map((_, i) => {
-                                            const isAnswered = userAnswers[i] !== -1;
-                                            const isMarked = markedForReview[i];
-                                            const isVisited = visitedQuestions[i];
-                                            const isCurrent = currentQuestionIndex === i;
-
-                                            let bgColor = 'bg-white dark:bg-slate-800';
-                                            let textColor = 'text-slate-500 dark:text-slate-400';
-                                            let borderColor = 'border-slate-200 dark:border-slate-700';
-
-                                            if (isAnswered && !isMarked) {
-                                                bgColor = 'bg-green-500 dark:bg-green-600';
-                                                textColor = 'text-white';
-                                                borderColor = 'border-transparent';
-                                            } else if (isAnswered && isMarked) {
-                                                bgColor = 'bg-purple-500 dark:bg-purple-600';
-                                                textColor = 'text-white';
-                                                borderColor = 'border-transparent';
-                                            } else if (!isAnswered && isMarked) {
-                                                bgColor = 'bg-purple-500 dark:bg-purple-600';
-                                                textColor = 'text-white';
-                                                borderColor = 'border-transparent';
-                                            } else if (isVisited && !isAnswered) {
-                                                bgColor = 'bg-red-500 dark:bg-red-600';
-                                                textColor = 'text-white';
-                                                borderColor = 'border-transparent';
-                                            }
-
-                                            return (
-                                                <button
-                                                    key={i}
-                                                    onClick={() => navigateToQuestion(i)}
-                                                    className={`relative w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm transition-all border-2 
-                                                        ${bgColor} ${textColor} ${borderColor} 
-                                                        ${isCurrent ? 'ring-4 ring-indigo-500/30 scale-110 z-10' : 'hover:scale-105'}
-                                                    `}
-                                                >
-                                                    {isCurrent && !isAnswered && !isMarked && !isVisited && (
-                                                         <div className="absolute inset-0 rounded-xl border-2 border-indigo-500 pointer-events-none" />
-                                                    )}
-                                                    {i + 1}
-                                                    {isAnswered && isMarked && (
-                                                        <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-green-500 border-2 border-white dark:border-slate-900 rounded-full" />
-                                                    )}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Legend */}
-                            <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-700/50">
-                                <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-4 h-4 rounded border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800" />
-                                        <span>Not Visited</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-4 h-4 rounded bg-red-500" />
-                                        <span>Not Answered</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-4 h-4 rounded bg-green-500" />
-                                        <span>Answered</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-4 h-4 rounded bg-purple-500" />
-                                        <span>Marked</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 col-span-2">
-                                        <div className="w-4 h-4 rounded bg-purple-500 relative">
-                                            <div className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 bg-green-500 border border-white rounded-full" />
-                                        </div>
-                                        <span>Answered & Marked</span>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <button
-                                onClick={() => setStep('result')}
-                                className="mt-6 w-full py-4 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl font-black uppercase tracking-widest text-xs transition-colors border border-indigo-200/50 dark:border-indigo-800/50"
-                            >
-                                Submit Test
-                            </button>
-                        </div>
+                        <LiveExamPanel
+                            exam={selectedExam}
+                            subjectName={selectedSubject.name}
+                            questions={questions}
+                            currentQuestionIndex={currentQuestionIndex}
+                            userAnswers={userAnswers}
+                            visitedQuestions={visitedQuestions}
+                            markedForReview={markedForReview}
+                            timeLeftSeconds={timer}
+                            isLowTime={timer <= 5 * 60}
+                            eliminated={eliminated}
+                            bookmarked={bookmarked}
+                            notes={notes}
+                            onAnswerSelect={handleAnswerSelect}
+                            onNavigate={navigateToQuestion}
+                            onClear={handleClearResponse}
+                            onSaveAndNext={handleSaveAndNext}
+                            onMarkAndNext={handleMarkAndNext}
+                            onPrevious={handlePrevious}
+                            onSubmit={() => setStep('result')}
+                            onToggleEliminate={handleToggleEliminate}
+                            onToggleBookmark={handleToggleBookmark}
+                            onNoteChange={handleNoteChange}
+                        />
                     </motion.div>
                 )}
 
@@ -867,7 +754,7 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                                     {[
                                         { icon: <Target />, value: `${calculateScore()} / ${questions.length}`, label: 'Score Index', delay: 0.3 },
                                         { icon: <CheckCircle />, value: `${Math.round((calculateScore() / questions.length) * 100)}%`, label: 'Accuracy Rate', delay: 0.4 },
-                                        { icon: <Clock />, value: formatTime(timer), label: 'Time Invested', delay: 0.5 }
+                                        { icon: <Clock />, value: formatTime(elapsedSeconds || Math.max(0, (selectedExam?.timeMinutes || 0) * 60 - timer)), label: 'Time Invested', delay: 0.5 }
                                     ].map((stat, i) => (
                                         <motion.div
                                             key={i}

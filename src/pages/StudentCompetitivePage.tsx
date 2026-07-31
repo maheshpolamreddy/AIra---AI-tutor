@@ -1,74 +1,60 @@
 import { useNavigate } from 'react-router-dom';
-
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Trophy } from 'lucide-react';
 import { studentRoutes } from '../utils/routes';
 import PageTransition from '../components/common/PageTransition';
 import CompetitiveDashboard from '../components/competitive/CompetitiveDashboard';
+import AiraLogo from '../components/brand/AiraLogo';
 
 export default function StudentCompetitivePage() {
   const navigate = useNavigate();
 
   return (
     <PageTransition>
-      <div className="h-screen bg-slate-50 dark:bg-slate-950 relative overflow-hidden transition-colors duration-500 flex flex-col">
-        {/* Ultra-Vibrant Mesh Gradient System */}
-        <div className="fixed inset-0 pointer-events-none overflow-hidden">
-          {/* Base Layer - Deeper tint to make white cards pop */}
-          <div className="absolute inset-0 bg-slate-100 dark:bg-slate-950 transition-colors duration-700" />
-
-          {/* High-Vibrancy Mesh Blobs - Upgraded to richer jewel tones */}
-          <div className="absolute inset-0 opacity-[0.55] dark:opacity-[0.4] transition-opacity duration-1000">
-            {/* Top Left - Deep Violet/Indigo */}
-            <div className="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] bg-[radial-gradient(circle,rgba(79,70,229,0.7)_0%,transparent_70%)] mix-blend-multiply dark:mix-blend-screen" />
-
-            {/* Top Right - Fuchsia/Pink */}
-            <div className="absolute top-[-10%] right-[-15%] w-[60%] h-[60%] bg-[radial-gradient(circle,rgba(217,70,239,0.6)_0%,transparent_70%)] mix-blend-multiply dark:mix-blend-screen" />
-
-            {/* Center Left - Cyan/Teal */}
-            <div className="absolute top-[30%] left-[-20%] w-[50%] h-[50%] bg-[radial-gradient(circle,rgba(6,182,212,0.5)_0%,transparent_70%)] mix-blend-multiply dark:mix-blend-screen" />
-
-            {/* Bottom Right - Rose/Orange */}
-            <div className="absolute bottom-[-20%] right-[-10%] w-[70%] h-[70%] bg-[radial-gradient(circle,rgba(244,63,94,0.5)_0%,transparent_70%)] mix-blend-multiply dark:mix-blend-screen" />
-
-            {/* Bottom Left - Rich Purple accent */}
-            <div className="absolute bottom-[-10%] left-[20%] w-[40%] h-[40%] bg-[radial-gradient(circle,rgba(147,51,234,0.5)_0%,transparent_70%)] mix-blend-multiply dark:mix-blend-screen" />
+      <div className="competitive-mode relative flex h-[100dvh] flex-col overflow-hidden transition-colors duration-500">
+        <div className="pointer-events-none fixed inset-0 overflow-hidden">
+          <div className="absolute inset-0 bg-[var(--comp-surface)]" />
+          <div className="absolute inset-0 opacity-70 dark:opacity-50">
+            <div className="absolute -left-[12%] -top-[18%] h-[55%] w-[55%] rounded-full bg-[radial-gradient(circle,rgba(194,65,12,0.22)_0%,transparent_70%)]" />
+            <div className="absolute -right-[10%] top-[-8%] h-[48%] w-[48%] rounded-full bg-[radial-gradient(circle,rgba(245,158,11,0.18)_0%,transparent_70%)]" />
+            <div className="absolute bottom-[-18%] left-[18%] h-[42%] w-[42%] rounded-full bg-[radial-gradient(circle,rgba(14,165,233,0.12)_0%,transparent_70%)]" />
+            <div className="absolute bottom-[-12%] right-[-8%] h-[46%] w-[46%] rounded-full bg-[radial-gradient(circle,rgba(219,39,119,0.1)_0%,transparent_70%)]" />
           </div>
-
-          {/* High-Impact Animated Accents - Optimized with CSS rather than React JS thread loop */}
-          <div className="absolute top-[20%] right-[20%] w-[30%] h-[30%] bg-purple-400/30 rounded-full blur-[100px] animate-float hw-accelerate pointer-events-none" />
-
-          {/* Noise/Grain Texture for Depth */}
-          <div className="absolute inset-0 opacity-[0.04] dark:opacity-[0.08] mix-blend-overlay"
+          <div
+            className="absolute inset-0 opacity-[0.035] mix-blend-overlay dark:opacity-[0.07]"
             style={{
-              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
-              backgroundRepeat: 'repeat',
-              backgroundSize: '128px 128px'
+              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+              backgroundSize: '160px 160px',
             }}
           />
         </div>
 
-        <div className="relative z-10 flex flex-col h-full overflow-hidden">
-          <header className="bg-white/70 dark:bg-slate-900/40 backdrop-blur-xl border-b border-white/20 dark:border-slate-800/50 sticky top-0 z-50">
-            <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="relative z-10 flex h-full flex-col overflow-hidden">
+          <header className="sticky top-0 z-50 border-b border-[var(--comp-border)] bg-[var(--comp-elevated)]/75 backdrop-blur-xl">
+            <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
               <button
+                type="button"
                 onClick={() => navigate(studentRoutes.modeSelection)}
-                className="group p-2.5 rounded-2xl bg-white/50 dark:bg-slate-800/50 hover:bg-white dark:hover:bg-slate-700 shadow-sm border border-black/5 dark:border-white/5 transition-all active:scale-95 flex items-center gap-2"
+                className="group flex items-center gap-2 rounded-2xl border border-[var(--comp-border)] bg-white/70 px-3 py-2 shadow-sm transition active:scale-95 dark:bg-slate-900/60"
               >
-                <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-slate-300 group-hover:-translate-x-1 transition-transform" />
-                <span className="text-sm font-bold text-gray-600 dark:text-slate-300 hidden sm:inline">Back to Modes</span>
+                <ArrowLeft className="h-4 w-4 text-slate-600 transition group-hover:-translate-x-0.5 dark:text-slate-300" />
+                <span className="hidden text-sm font-bold text-slate-600 sm:inline dark:text-slate-300">
+                  Modes
+                </span>
               </button>
 
-              <div className="flex-1 flex justify-center lg:absolute lg:left-1/2 lg:-translate-x-1/2">
-                <span className="font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 animate-gradient-x">
-                  Aɪra
+              <div className="flex items-center gap-2.5">
+                <AiraLogo height={32} />
+                <span className="hidden items-center gap-1.5 rounded-full border border-orange-200/70 bg-orange-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-orange-700 sm:inline-flex dark:border-orange-900/50 dark:bg-orange-950/40 dark:text-orange-300">
+                  <Trophy className="h-3 w-3" />
+                  Competitive
                 </span>
               </div>
-              
-              <div className="w-[124px] hidden sm:block" /> {/* Balances flex space */}
+
+              <div className="w-[72px] sm:w-[88px]" />
             </div>
           </header>
 
-          <main className="flex-1 w-full max-w-7xl mx-auto overflow-hidden">
+          <main className="min-h-0 flex-1 overflow-hidden">
             <CompetitiveDashboard />
           </main>
         </div>

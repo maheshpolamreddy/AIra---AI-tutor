@@ -110,6 +110,17 @@ export const COMPETITIVE_EXAMS: Exam[] = [
         papers: generatePapers(),
     },
     {
+        id: 'gate',
+        name: 'GATE',
+        timeMinutes: 180,
+        subjects: [
+            { id: 'eng-core', name: 'Engineering Core', questionsCount: 45 },
+            { id: 'eng-math', name: 'Engineering Mathematics', questionsCount: 13 },
+            { id: 'ga', name: 'General Aptitude', questionsCount: 10 },
+        ],
+        papers: generatePapers(),
+    },
+    {
         id: 'sainik',
         name: 'Sainik School',
         timeMinutes: 150,

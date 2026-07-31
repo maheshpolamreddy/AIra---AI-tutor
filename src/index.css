@@ -990,3 +990,72 @@ body.visual-freeze-active *::after {
     animation: none !important;
   }
 }
+
+/* ── Competitive Mode enterprise shell ── */
+.competitive-mode {
+  --comp-surface: #f4f1eb;
+  --comp-elevated: #ffffff;
+  --comp-ink: #0f172a;
+  --comp-muted: #64748b;
+  --comp-accent: #c2410c;
+  --comp-accent-soft: #ea580c;
+  --comp-ring: rgba(194, 65, 12, 0.28);
+  --comp-border: rgba(15, 23, 42, 0.08);
+  color: var(--comp-ink);
+}
+
+.dark .competitive-mode {
+  --comp-surface: #070b14;
+  --comp-elevated: #0f172a;
+  --comp-ink: #f8fafc;
+  --comp-muted: #94a3b8;
+  --comp-accent: #fb923c;
+  --comp-accent-soft: #f97316;
+  --comp-ring: rgba(251, 146, 60, 0.35);
+  --comp-border: rgba(148, 163, 184, 0.14);
+}
+
+.comp-exam-card {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 22px 50px -28px rgba(15, 23, 42, 0.45);
+  transition:
+    transform 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.45s ease;
+}
+
+.comp-exam-card:hover {
+  transform: translateY(-8px) scale(1.015);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.25) inset,
+    0 32px 64px -28px color-mix(in srgb, var(--exam-accent, #ea580c) 55%, transparent);
+}
+
+.comp-exam-card:focus-visible {
+  box-shadow: 0 0 0 3px var(--comp-ring);
+}
+
+.live-exam-panel {
+  animation: live-exam-enter 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes live-exam-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .comp-exam-card,
+  .comp-exam-card:hover,
+  .live-exam-panel {
+    transition: none !important;
+    animation: none !important;
+    transform: none !important;
+  }
+}

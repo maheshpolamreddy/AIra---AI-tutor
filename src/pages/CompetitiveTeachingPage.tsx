@@ -375,67 +375,85 @@ Do NOT use robotic templates. Every explanation must be generated completely dyn
 --- DYNAMIC VISUAL HIGHLIGHTS ---
 Identify 2-5 key mathematical equations, chemical names, vocabulary terms, or option labels that appear in the explanation, and return them in the "highlights" array. These will be highlighted on the virtual blackboard as you explain.
 
-Generate exactly 6 steps in JSON format:
+Generate exactly 8 steps in JSON format — teach like a premium classroom lecture, not an answer key:
 
 [
   {
     "id": 1,
-    "title": "Answer Announcement",
-    "subtitle": "Reviewing the result",
-    "visualType": "answer",
-    "content": "## ${hasUserAnswer ? (isUserCorrect ? '🎉 Correct!' : '💡 Learning Opportunity') : '📌 Solution & Result'}\\n\\nThe correct option is **Option ${String.fromCharCode(65 + question.correctAnswer)}**: ${question.options[question.correctAnswer]}.\\n\\n${
-      hasUserAnswer 
-        ? (isUserCorrect 
-            ? 'Excellent job! You correctly identified the right choice. Let us review the concept to reinforce your understanding.' 
-            : `You selected Option ${userSelectedLabel}. Let us look at why this option is attractive, address the common misconception, and work through the correction.`)
-        : 'Let us dive into the details to understand why this choice is correct.'
-    }",
-    "speech": "[Encouraging opening. Announce the correct option. ${hasUserAnswer && !isUserCorrect ? `Deconstruct the misconception behind choosing Option ${userSelectedLabel} and encourage the student.` : 'Acknowledge the question and difficulty level.'}]",
-    "highlights": ["Option ${String.fromCharCode(65 + question.correctAnswer)}"]
+    "title": "Concept Introduction",
+    "subtitle": "What this question is really testing",
+    "visualType": "concept",
+    "content": "## Framing the idea\\n\\n[Introduce the core concept/topic before touching options. Define the key idea in 2-4 sentences.]",
+    "speech": "[Open like a lecturer: name the concept, why it matters in ${examName || 'this exam'}, and what skill is being tested.]",
+    "highlights": ["${question.topic}"]
   },
   {
     "id": 2,
-    "title": "Why It Is Correct",
-    "subtitle": "Mathematical and logical validation",
-    "visualType": "solution",
-    "content": "## Detailed Derivation / Explanation\\n\\n[Provide a detailed, step-by-step logical proof, algebraic derivation, or conceptual reasoning for why the correct option is indeed correct. Show equations or reactions clearly.]",
-    "speech": "[Lecturer speech explaining the step-by-step logic or derivation. Guide the student through the core formula or mechanism.]",
-    "highlights": []
+    "title": "Answer Announcement",
+    "subtitle": "Reviewing the result",
+    "visualType": "answer",
+    "content": "## ${hasUserAnswer ? (isUserCorrect ? 'Correct' : 'Learning opportunity') : 'Solution'}\\n\\nThe correct option is **Option ${String.fromCharCode(65 + question.correctAnswer)}**: ${question.options[question.correctAnswer]}.\\n\\n${
+      hasUserAnswer
+        ? (isUserCorrect
+            ? 'Strong work — reinforce the method so it sticks under timed pressure.'
+            : `You chose Option ${userSelectedLabel}. We will diagnose the trap and rebuild the correct path.`)
+        : 'We will derive this carefully so the method transfers to similar questions.'
+    }",
+    "speech": "[Announce the correct option clearly. ${hasUserAnswer && !isUserCorrect ? `Address why Option ${userSelectedLabel} felt tempting.` : 'Acknowledge difficulty and set expectations for the walkthrough.'}]",
+    "highlights": ["Option ${String.fromCharCode(65 + question.correctAnswer)}"]
   },
   {
     "id": 3,
-    "title": "Option Analysis",
-    "subtitle": "Why other options are incorrect",
-    "visualType": "insight",
-    "content": "## Option Deconstruction\\n\\n- **Option A**: [Why A is wrong]\\n- **Option B**: [Why B is wrong]\\n- **Option C**: [Why C is wrong]\\n- **Option D**: [Why D is wrong]\\n\\n*(Omit the correct option or keep its explanation brief)*",
-    "speech": "[Lecture explaining why other options are distractor choices, explaining the common traps built into the incorrect options.]",
+    "title": "Step-by-step Solution",
+    "subtitle": "Derivation / reasoning path",
+    "visualType": "solution",
+    "content": "## Worked solution\\n\\n[Numbered steps. Show equations, reactions, or logic clearly. End with how the correct option falls out.]",
+    "speech": "[Walk through each step aloud at a measured pace. Emphasize pivots where students usually slip.]",
     "highlights": []
   },
   {
     "id": 4,
-    "title": "Core Concept",
-    "subtitle": "The underlying lesson",
-    "visualType": "concept",
-    "content": "## Understanding ${question.topic}\\n\\n[Deep dive into the underlying lesson/topic. Explain the key definition, physical law, scientific theorem, or grammar rule. Do not just explain this specific question; teach the broader concept.]",
-    "speech": "[Deep educational speech focusing on teaching the core concepts and principles. Sound like a professor sharing a key insight.]",
-    "highlights": ["${question.topic}"]
+    "title": "Option Analysis",
+    "subtitle": "Why each choice is right or wrong",
+    "visualType": "insight",
+    "content": "## Deconstructing the options\\n\\n- **Option A**: [correct/incorrect reason]\\n- **Option B**: [...]\\n- **Option C**: [...]\\n- **Option D**: [...]\\n\\nCall out the designed distractors.",
+    "speech": "[Explain distractors as an experienced examiner would — what misconception each wrong option targets.]",
+    "highlights": []
   },
   {
     "id": 5,
-    "title": "Real-World Connection",
-    "subtitle": "Practical applications",
-    "visualType": "concept",
-    "content": "## Practical Application\\n\\n[Provide an interesting, relatable real-world example or practical application of this concept. How is this used in modern engineering, biology, chemistry, daily life, or history?]",
-    "speech": "[Relate the concept to daily life or industry applications, explaining it with a natural, storytelling tone.]",
+    "title": "Common Mistakes",
+    "subtitle": "Traps to avoid in the hall",
+    "visualType": "insight",
+    "content": "## Frequent errors\\n\\n- [Mistake 1]\\n- [Mistake 2]\\n- [Mistake 3]\\n\\nHow to spot them in under 10 seconds.",
+    "speech": "[List the classic mistakes for this question type with a coaching tone.]",
     "highlights": []
   },
   {
     "id": 6,
-    "title": "Memory Tip",
-    "subtitle": "Mnemonics and exam strategies",
+    "title": "Shortcuts & Exam Tips",
+    "subtitle": "Speed under pressure",
     "visualType": "insight",
-    "content": "## Shortcuts & Tricks\\n\\n- **Memory Aid**: [Mnemonic, diagram representation, or memory rule]\\n- **Exam Strategy**: [A quick trick or elimination shortcut for solving this under 30 seconds]",
-    "speech": "[Share a handy mnemonic, shortcut, or strategy to recall or solve this easily in the exam hall. End on an encouraging note.]",
+    "content": "## Tricks & strategy\\n\\n- **Shortcut**: [when applicable]\\n- **Elimination tip**: [...]\\n- **Time box**: target seconds for this difficulty",
+    "speech": "[Share a practical shortcut or elimination order useful in a timed paper.]",
+    "highlights": []
+  },
+  {
+    "id": 7,
+    "title": "Memory & Real-world Link",
+    "subtitle": "Retention + analogy",
+    "visualType": "concept",
+    "content": "## Stick the concept\\n\\n- **Mnemonic / memory hook**: [...]\\n- **Analogy**: [relatable real-world picture when it helps]\\n- **Alternative method**: [second valid approach if one exists]",
+    "speech": "[Give a memorable hook and, if natural, a real-world analogy. Mention an alternate method when useful.]",
+    "highlights": []
+  },
+  {
+    "id": 8,
+    "title": "Summary & Next Practice",
+    "subtitle": "Close the loop",
+    "visualType": "answer",
+    "content": "## Takeaways\\n\\n1. [Key takeaway]\\n2. [Key takeaway]\\n3. [Key takeaway]\\n\\n**Follow-up practice**: suggest one related topic or question pattern to attempt next.",
+    "speech": "[Summarize crisply and end with one concrete practice suggestion plus encouragement.]",
     "highlights": []
   }
 ]
