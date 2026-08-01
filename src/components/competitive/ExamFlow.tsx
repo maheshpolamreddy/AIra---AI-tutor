@@ -1,14 +1,27 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronRight, ArrowLeft, FileText, Brain, Target, CheckCircle, XCircle, RefreshCw, Trophy, Calendar, BrainCircuit, Clock, Sparkles } from 'lucide-react';
 import { COMPETITIVE_EXAMS, Exam, ExamSubject, Paper } from '../../data/mockData';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Question } from '../../data/competitiveQuestions';
 import { aiExamGenerator } from '../../services/aiExamGenerator';
 import { EXAM_THEMES } from '../../data/examThemes';
 import ExamCard from './ExamCard';
 import LiveExamPanel from './LiveExamPanel';
 import { useCompetitiveStore } from '../../stores/competitiveStore';
+import { PremiumMetricCard, PremiumSelectionCard } from './CompetitiveCards';
+import {
+    clearExamDraft,
+    findExam,
+    findPaper,
+    findSubject,
+    loadExamDraft,
+    normalizeExamStep,
+    saveExamDraft,
+    saveExplainPayload,
+    type ExamDraft,
+    type ExamFlowStep,
+} from '../../lib/competitiveRoute';
 
 
 interface ExamFlowProps {
@@ -19,37 +32,144 @@ interface ExamFlowProps {
 
 export default function ExamFlow({ isDashboardView = false, onExamStateChange, flowType = 'standard' }: ExamFlowProps = {}) {
     const navigate = useNavigate();
+    const location = useLocation();
+    const [searchParams, setSearchParams] = useSearchParams();
     const recordAttempt = useCompetitiveStore((s) => s.recordAttempt);
-    const recordedRef = useRef(false);
-    const [step, setStep] = useState<'exam' | 'subject' | 'paper' | 'solving' | 'result'>('exam');
-    const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
-    const [selectedSubject, setSelectedSubject] = useState<ExamSubject | null>(null);
-    const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null);
+
+    /**
+     * The flow is addressed entirely by the URL, so a refresh or a back button
+     * press lands on the same screen instead of resetting to the catalog.
+     */
+    const step = normalizeExamStep(searchParams.get('step'));
+    const selectedExam = useMemo(() => findExam(searchParams.get('exam')), [searchParams]);
+    const selectedSubject = useMemo(
+        () => findSubject(selectedExam, searchParams.get('subject')),
+        [selectedExam, searchParams],
+    );
+    const selectedPaper = useMemo(
+        () => findPaper(selectedExam, searchParams.get('paper')),
+        [selectedExam, searchParams],
+    );
+
+    const updateFlowParams = useCallback(
+        (updates: Record<string, string | null>, options: { replace?: boolean } = {}) => {
+            setSearchParams(
+                (prev) => {
+                    const next = new URLSearchParams(prev);
+                    Object.entries(updates).forEach(([key, value]) => {
+                        if (value === null) next.delete(key);
+                        else next.set(key, value);
+                    });
+                    return next;
+                },
+                { replace: options.replace ?? false },
+            );
+        },
+        [setSearchParams],
+    );
+
+    const goToStep = useCallback(
+        (
+            next: ExamFlowStep,
+            updates: Record<string, string | null> = {},
+            options: { replace?: boolean } = {},
+        ) => {
+            const base: Record<string, string | null> =
+                next === 'exam'
+                    ? { step: null, exam: null, subject: null, paper: null }
+                    : { step: next };
+            updateFlowParams({ ...base, ...updates }, options);
+        },
+        [updateFlowParams],
+    );
+
+    /**
+     * A live paper cannot live in the URL, so it is mirrored into sessionStorage
+     * and read back synchronously on the first render of a resumed session.
+     */
+    const initialDraftRef = useRef<ExamDraft | null | undefined>(undefined);
+    if (initialDraftRef.current === undefined) {
+        const params = new URLSearchParams(window.location.search);
+        const urlStep = normalizeExamStep(params.get('step'));
+        const draft = urlStep === 'solving' || urlStep === 'result' ? loadExamDraft(flowType) : null;
+        initialDraftRef.current =
+            draft && draft.examId === params.get('exam') && draft.subjectId === params.get('subject')
+                ? draft
+                : null;
+    }
+    const initialDraft = initialDraftRef.current;
+
+    // A resumed scorecard was already written to analytics before the reload,
+    // so it must not be counted a second time.
+    const recordedRef = useRef(initialDraft?.step === 'result');
 
     // Exam Logic State
-    const [questions, setQuestions] = useState<Question[]>([]);
-    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-    const [userAnswers, setUserAnswers] = useState<number[]>([]); // Index of selected option per question
-    
+    const [questions, setQuestions] = useState<Question[]>(() => initialDraft?.questions ?? []);
+    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(
+        () => initialDraft?.currentQuestionIndex ?? 0,
+    );
+    const [userAnswers, setUserAnswers] = useState<number[]>(() => initialDraft?.userAnswers ?? []); // Index of selected option per question
+
     // Real Exam Interface Status Tracking
-    const [visitedQuestions, setVisitedQuestions] = useState<boolean[]>([]);
-    const [markedForReview, setMarkedForReview] = useState<boolean[]>([]);
-    const [bookmarked, setBookmarked] = useState<boolean[]>([]);
-    const [eliminated, setEliminated] = useState<Record<number, number[]>>({});
-    const [notes, setNotes] = useState<Record<number, string>>({});
+    const [visitedQuestions, setVisitedQuestions] = useState<boolean[]>(
+        () => initialDraft?.visitedQuestions ?? [],
+    );
+    const [markedForReview, setMarkedForReview] = useState<boolean[]>(
+        () => initialDraft?.markedForReview ?? [],
+    );
+    const [bookmarked, setBookmarked] = useState<boolean[]>(() => initialDraft?.bookmarked ?? []);
+    const [eliminated, setEliminated] = useState<Record<number, number[]>>(
+        () => initialDraft?.eliminated ?? {},
+    );
+    const [notes, setNotes] = useState<Record<number, string>>(() => initialDraft?.notes ?? {});
 
     const [showExplanation, setShowExplanation] = useState(false);
     /** Remaining seconds while solving (countdown). Also stores elapsed on result. */
-    const [timer, setTimer] = useState(0);
-    const [elapsedSeconds, setElapsedSeconds] = useState(0);
+    const [timer, setTimer] = useState(() => initialDraft?.timer ?? 0);
+    const [elapsedSeconds, setElapsedSeconds] = useState(() => initialDraft?.elapsedSeconds ?? 0);
     const [isGenerating, setIsGenerating] = useState(false);
+    const [reviewFilter, setReviewFilter] = useState<'all' | 'correct' | 'incorrect' | 'unattempted'>('all');
 
     // Hook to inform parent (CompetitiveDashboard) when we enter/exit exam mode
     useEffect(() => {
-        if (onExamStateChange) {
-            onExamStateChange(step === 'solving' || step === 'result');
-        }
+        onExamStateChange?.(step === 'solving' || step === 'result');
     }, [step, onExamStateChange]);
+
+    // Leaving the section entirely must release the immersive layout.
+    useEffect(() => () => onExamStateChange?.(false), [onExamStateChange]);
+
+    /**
+     * Repairs URLs that cannot be rendered — a hand-edited link, a stale
+     * bookmark, or a resumed tab whose exam draft has expired.
+     */
+    useEffect(() => {
+        if (isGenerating) return;
+
+        if (step === 'subject' && !selectedExam) {
+            goToStep('exam', {}, { replace: true });
+            return;
+        }
+        if (step === 'paper' && (!selectedExam || !selectedSubject || flowType === 'standard')) {
+            goToStep(selectedExam ? 'subject' : 'exam', {}, { replace: true });
+            return;
+        }
+        if ((step === 'solving' || step === 'result') && questions.length === 0) {
+            if (!selectedExam) goToStep('exam', {}, { replace: true });
+            else if (!selectedSubject) goToStep('subject', {}, { replace: true });
+            else goToStep(flowType === 'pyq' ? 'paper' : 'subject', {}, { replace: true });
+        }
+    }, [step, selectedExam, selectedSubject, questions.length, isGenerating, flowType, goToStep]);
+
+    // A reload mid-paper would silently discard the attempt without a prompt.
+    useEffect(() => {
+        if (step !== 'solving') return;
+        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+            event.preventDefault();
+            event.returnValue = '';
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [step]);
 
     // Countdown timer — auto-submit at zero
     useEffect(() => {
@@ -59,46 +179,53 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
             setTimer((prev) => {
                 if (prev <= 1) {
                     clearInterval(interval);
-                    queueMicrotask(() => setStep('result'));
+                    queueMicrotask(() => goToStep('result', {}, { replace: true }));
                     return 0;
                 }
                 return prev - 1;
             });
         }, 1000);
         return () => clearInterval(interval);
-    }, [step]);
+    }, [step, goToStep]);
 
-    // Autosave draft progress while solving
+    // Autosave draft progress while solving so a reload resumes the same paper
     useEffect(() => {
-        if (step !== 'solving' || !selectedExam || !selectedSubject) return;
-        try {
-            sessionStorage.setItem(
-                'aira-exam-draft',
-                JSON.stringify({
-                    examId: selectedExam.id,
-                    subjectId: selectedSubject.id,
-                    currentQuestionIndex,
-                    userAnswers,
-                    markedForReview,
-                    bookmarked,
-                    notes,
-                    timer,
-                    savedAt: Date.now(),
-                }),
-            );
-        } catch {
-            /* ignore quota */
-        }
+        if (step !== 'solving' || !selectedExam || !selectedSubject || !questions.length) return;
+        saveExamDraft({
+            version: 2,
+            flowType,
+            examId: selectedExam.id,
+            subjectId: selectedSubject.id,
+            paperYear: selectedPaper ? String(selectedPaper.year) : undefined,
+            step: 'solving',
+            questions,
+            currentQuestionIndex,
+            userAnswers,
+            visitedQuestions,
+            markedForReview,
+            bookmarked,
+            eliminated,
+            notes,
+            timer,
+            elapsedSeconds,
+            savedAt: Date.now(),
+        });
     }, [
         step,
+        flowType,
         selectedExam,
         selectedSubject,
+        selectedPaper,
+        questions,
         currentQuestionIndex,
         userAnswers,
+        visitedQuestions,
         markedForReview,
         bookmarked,
+        eliminated,
         notes,
         timer,
+        elapsedSeconds,
     ]);
 
     // Persist attempt once when results open
@@ -121,39 +248,48 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
             timeSeconds: elapsedSeconds || Math.max(0, (selectedExam.timeMinutes * 60) - timer),
             paperYear: selectedPaper ? String(selectedPaper.year) : undefined,
         });
-        try {
-            sessionStorage.removeItem('aira-exam-draft');
-        } catch {
-            /* ignore */
-        }
+        // Keep the draft, flipped to `result`, so reloading the scorecard still
+        // has the paper and answers needed to render the review.
+        saveExamDraft({
+            version: 2,
+            flowType,
+            examId: selectedExam.id,
+            subjectId: selectedSubject.id,
+            paperYear: selectedPaper ? String(selectedPaper.year) : undefined,
+            step: 'result',
+            questions,
+            currentQuestionIndex,
+            userAnswers,
+            visitedQuestions,
+            markedForReview,
+            bookmarked,
+            eliminated,
+            notes,
+            timer,
+            elapsedSeconds,
+            savedAt: Date.now(),
+        });
     }, [
         step,
         selectedExam,
         selectedSubject,
         selectedPaper,
         questions,
+        currentQuestionIndex,
         userAnswers,
+        visitedQuestions,
+        markedForReview,
+        bookmarked,
+        eliminated,
+        notes,
         elapsedSeconds,
         timer,
         flowType,
         recordAttempt,
     ]);
 
-    const handleBack = () => {
-        if (step === 'result') {
-            setStep(flowType === 'pyq' ? 'paper' : 'subject');
-            resetExam();
-        } else if (step === 'solving') {
-            const confirmQuit = window.confirm('Leave the exam? Your draft is auto-saved for this browser tab.');
-            if (confirmQuit) {
-                setStep(flowType === 'pyq' ? 'paper' : 'subject');
-                resetExam();
-            }
-        } else if (step === 'paper') setStep('subject');
-        else if (step === 'subject') setStep('exam');
-    };
-
-    const resetExam = () => {
+    const resetExam = useCallback(() => {
+        setQuestions([]);
         setCurrentQuestionIndex(0);
         setUserAnswers([]);
         setVisitedQuestions([]);
@@ -164,12 +300,30 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
         setShowExplanation(false);
         setTimer(0);
         setElapsedSeconds(0);
+        setReviewFilter('all');
         recordedRef.current = false;
+        clearExamDraft(flowType);
+    }, [flowType]);
+
+    const exitToSelection = useCallback(() => {
+        resetExam();
+        if (flowType === 'pyq' && selectedSubject) goToStep('paper', { paper: null });
+        else if (selectedExam) goToStep('subject', { paper: null });
+        else goToStep('exam');
+    }, [flowType, goToStep, resetExam, selectedExam, selectedSubject]);
+
+    const handleBack = () => {
+        if (step === 'result') {
+            exitToSelection();
+        } else if (step === 'solving') {
+            const confirmQuit = window.confirm('Leave this exam? Your answers for this attempt will be discarded.');
+            if (confirmQuit) exitToSelection();
+        } else if (step === 'paper') goToStep('subject', { paper: null });
+        else if (step === 'subject') goToStep('exam');
     };
 
     const handleExamSelect = (exam: Exam) => {
-        setSelectedExam(exam);
-        setStep('subject');
+        goToStep('subject', { exam: exam.id, subject: null, paper: null });
     };
 
     const resolveExamYear = (exam: Exam, paper: Paper | null | undefined) => {
@@ -177,7 +331,12 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
         return String(exam.papers?.[0]?.year ?? new Date().getFullYear() - 1);
     };
 
-    const applyQuestionsAndStartSolving = (finalQuestions: Question[], exam: Exam) => {
+    const applyQuestionsAndStartSolving = (
+        finalQuestions: Question[],
+        exam: Exam,
+        subject: ExamSubject,
+        paper: Paper | null,
+    ) => {
         setQuestions(finalQuestions);
         setUserAnswers(new Array(finalQuestions.length).fill(-1));
         const initialVisited = new Array(finalQuestions.length).fill(false);
@@ -195,7 +354,30 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
             Math.round((exam.timeMinutes * 60 * (finalQuestions.length || 1)) / Math.max(1, exam.subjects.reduce((s, sub) => s + sub.questionsCount, 0))),
         );
         setTimer(share);
-        setStep('solving');
+        saveExamDraft({
+            version: 2,
+            flowType,
+            examId: exam.id,
+            subjectId: subject.id,
+            paperYear: paper ? String(paper.year) : undefined,
+            step: 'solving',
+            questions: finalQuestions,
+            currentQuestionIndex: 0,
+            userAnswers: new Array(finalQuestions.length).fill(-1),
+            visitedQuestions: initialVisited,
+            markedForReview: new Array(finalQuestions.length).fill(false),
+            bookmarked: new Array(finalQuestions.length).fill(false),
+            eliminated: {},
+            notes: {},
+            timer: share,
+            elapsedSeconds: 0,
+            savedAt: Date.now(),
+        });
+        goToStep('solving', {
+            exam: exam.id,
+            subject: subject.id,
+            paper: paper ? String(paper.year) : null,
+        });
     };
 
     /** Full AI exam generation: syllabus-aligned, batched, fresh session each call. */
@@ -216,7 +398,12 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                 examYear: year,
                 mode: flowType === 'pyq' ? 'pyq' : 'mock',
             });
-            applyQuestionsAndStartSolving(finalQuestions, exam);
+            applyQuestionsAndStartSolving(
+                finalQuestions,
+                exam,
+                subject,
+                paperOverride !== undefined ? paperOverride : selectedPaper,
+            );
         } catch (error) {
             console.error('Failed to generate exam questions:', error);
         } finally {
@@ -225,18 +412,19 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
     };
 
     const handleSubjectSelect = async (subject: ExamSubject) => {
-        setSelectedSubject(subject);
         if (flowType === 'standard') {
-            if (selectedExam) {
-                await generateAndStartExam(selectedExam, subject, null);
-            }
+            if (!selectedExam) return;
+            // Reflect the choice immediately so the generating screen (and a
+            // reload during generation) still knows which subject is loading.
+            updateFlowParams({ subject: subject.id, paper: null }, { replace: true });
+            await generateAndStartExam(selectedExam, subject, null);
         } else {
-            setStep('paper');
+            goToStep('paper', { subject: subject.id, paper: null });
         }
     };
 
     const handlePaperSelect = async (paper: Paper) => {
-        setSelectedPaper(paper);
+        updateFlowParams({ paper: String(paper.year) }, { replace: true });
         if (selectedExam && selectedSubject) {
             await generateAndStartExam(selectedExam, selectedSubject, paper);
         }
@@ -271,7 +459,7 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
         if (currentQuestionIndex < questions.length - 1) {
             navigateToQuestion(currentQuestionIndex + 1);
         } else {
-            setStep('result');
+            goToStep('result');
         }
     };
 
@@ -336,9 +524,35 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
     };
 
     const activeTheme = selectedExam && EXAM_THEMES[selectedExam.id] ? EXAM_THEMES[selectedExam.id] : EXAM_THEMES['gate'];
+    const correctCount = calculateScore();
+    const attemptedCount = userAnswers.filter((answer) => answer !== -1).length;
+    const incorrectCount = Math.max(0, attemptedCount - correctCount);
+    const unattemptedCount = Math.max(0, questions.length - attemptedCount);
+    const accuracyPercent = questions.length
+        ? Math.round((correctCount / questions.length) * 100)
+        : 0;
+    const attemptPercent = questions.length
+        ? Math.round((attemptedCount / questions.length) * 100)
+        : 0;
+    const rawScore = correctCount * 4 - incorrectCount;
+    const maxScore = questions.length * 4;
+    const timeTakenSeconds =
+        elapsedSeconds || Math.max(0, (selectedExam?.timeMinutes || 0) * 60 - timer);
+    const reviewItems = questions
+        .map((question, index) => {
+            const answer = userAnswers[index];
+            const status: 'correct' | 'incorrect' | 'unattempted' =
+                answer === -1
+                    ? 'unattempted'
+                    : answer === question.correctAnswer
+                      ? 'correct'
+                      : 'incorrect';
+            return { question, index, status };
+        })
+        .filter((item) => reviewFilter === 'all' || item.status === reviewFilter);
 
     return (
-        <div className={`w-full relative ${isDashboardView && step === 'solving' ? 'min-h-screen' : ''}`}>
+        <div className={`relative w-full ${isDashboardView && step === 'solving' ? 'min-h-0' : ''}`}>
             <AnimatePresence mode="wait">
                 {isGenerating && (
                     <motion.div 
@@ -348,9 +562,9 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                         className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm"
                     >
                         <div className="w-20 h-20 mb-6 relative flex items-center justify-center">
-                            <div className="absolute inset-0 border-4 border-indigo-200 dark:border-indigo-900 rounded-full animate-ping opacity-75" />
-                            <div className="absolute inset-0 border-4 border-indigo-600 dark:border-indigo-400 rounded-full border-t-transparent animate-spin" />
-                            <BrainCircuit className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-pulse" />
+                            <div className="absolute inset-0 border-4 border-orange-200 dark:border-orange-900 rounded-full animate-ping opacity-75" />
+                            <div className="absolute inset-0 border-4 border-orange-600 dark:border-orange-400 rounded-full border-t-transparent animate-spin" />
+                            <BrainCircuit className="w-8 h-8 text-orange-600 dark:text-orange-400 animate-pulse" />
                         </div>
                         <h3 className="text-2xl font-black text-gray-900 dark:text-white mb-2 tracking-tight">Generating AI Exam...</h3>
                         <p className="text-sm font-medium text-gray-500 dark:text-slate-400 max-w-sm text-center">
@@ -367,34 +581,34 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                     {(step !== 'exam') && (
                         <button
                             onClick={handleBack}
-                            className="p-2 lg:p-3 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 rounded-2xl transition-all active:scale-95 flex items-center gap-2 group border border-slate-200 dark:border-slate-700 hover:border-indigo-200 shadow-sm"
+                            className="p-2 lg:p-3 bg-white dark:bg-slate-800 hover:bg-orange-50 dark:hover:bg-orange-900/40 rounded-2xl transition-all active:scale-95 flex items-center gap-2 group border border-slate-200 dark:border-slate-700 hover:border-orange-200 shadow-sm"
                         >
-                            <ArrowLeft className="w-4 h-4 text-indigo-600 dark:text-indigo-400 group-hover:-translate-x-1 transition-transform" />
+                            <ArrowLeft className="w-4 h-4 text-orange-600 dark:text-orange-400 group-hover:-translate-x-1 transition-transform" />
                             <span className="text-xs font-black text-slate-700 dark:text-slate-200 uppercase tracking-wider">Back to Exams</span>
                         </button>
                     )}
 
                     <div className="flex items-center gap-2 h-8 px-2 whitespace-nowrap">
-                        <span className={`text-[10px] font-black uppercase tracking-widest ${step === 'exam' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`}>Exams</span>
+                        <span className={`text-[10px] font-black uppercase tracking-widest ${step === 'exam' ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>Exams</span>
     
                         {selectedExam && (
                             <>
                                 <ChevronRight className="w-3 h-3 text-gray-300" />
-                                <span className={`text-[10px] font-black uppercase tracking-widest ${step === 'subject' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`}>{selectedExam.name}</span>
+                                <span className={`text-[10px] font-black uppercase tracking-widest ${step === 'subject' ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>{selectedExam.name}</span>
                             </>
                         )}
     
                         {selectedSubject && (
                             <>
                                 <ChevronRight className="w-3 h-3 text-gray-300" />
-                                <span className={`text-[10px] font-black uppercase tracking-widest ${step === 'paper' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`}>{selectedSubject.name}</span>
+                                <span className={`text-[10px] font-black uppercase tracking-widest ${step === 'paper' ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>{selectedSubject.name}</span>
                             </>
                         )}
     
                         {selectedPaper && (
                             <>
                                 <ChevronRight className="w-3 h-3 text-gray-300" />
-                                <span className={`text-[10px] font-black uppercase tracking-widest ${step === 'result' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`}>{selectedPaper.year}</span>
+                                <span className={`text-[10px] font-black uppercase tracking-widest ${step === 'result' ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>{selectedPaper.year}</span>
                             </>
                         )}
     
@@ -415,7 +629,7 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                                 const exam = COMPETITIVE_EXAMS.find(ex => ex.id === e.target.value);
                                 if (exam) handleExamSelect(exam);
                             }}
-                            className="text-xs font-bold bg-slate-100 dark:bg-slate-800 border-none rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500"
+                            className="text-xs font-bold bg-slate-100 dark:bg-slate-800 border-none rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-orange-500"
                             value=""
                         >
                             <option value="" disabled>Quick Select Exam</option>
@@ -474,7 +688,7 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                         exit={{ opacity: 0, y: -30 }}
                     >
                         <div className="mb-10 flex flex-col items-center text-center">
-                            <span className="px-4 py-1.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase tracking-widest mb-4 border border-indigo-100 dark:border-indigo-800/50">
+                            <span className="px-4 py-1.5 rounded-full bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 text-[10px] font-black uppercase tracking-widest mb-4 border border-orange-100 dark:border-orange-800/50">
                                 Domain Selection
                             </span>
                             <h2 className="text-4xl font-black text-gray-900 dark:text-white tracking-tighter mb-3">Choose Your Subject</h2>
@@ -514,60 +728,19 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                                 const bgUrl = SUBJECT_IMAGES[subject.id.trim().toLowerCase()] || SUBJECT_IMAGES[subject.name.trim().toLowerCase()] || SUBJECT_IMAGES['default'];
 
                                 return (
-                                    <motion.div
+                                    <PremiumSelectionCard
                                         key={subject.id}
-                                        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                                        transition={{ delay: i * 0.1, type: 'spring', damping: 20 }}
-                                    >
-                                        <button
-                                            onClick={() => handleSubjectSelect(subject)}
-                                            className="w-full relative overflow-hidden group rounded-[2.5rem] bg-white dark:bg-slate-900 border-4 border-transparent text-left transition-all duration-500 shadow-xl hover:shadow-2xl flex flex-col min-h-[220px]"
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.borderColor = `${theme.color}30`;
-                                                e.currentTarget.style.transform = 'translateY(-10px) scale(1.02)';
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.borderColor = 'transparent';
-                                                e.currentTarget.style.transform = 'translateY(0) scale(1)';
-                                            }}
-                                        >
-                                            {/* Visual Background */}
-                                            <div className="absolute inset-0 w-full h-full">
-                                                <div 
-                                                    className="absolute inset-0 bg-cover bg-center transition-transform duration-1000 group-hover:scale-110"
-                                                    style={{ backgroundImage: `url(${bgUrl})` }}
-                                                />
-                                                <div className="absolute inset-0 bg-gradient-to-br from-white/60 via-white/40 to-transparent dark:from-slate-900/60 dark:via-slate-900/40 dark:to-transparent opacity-100 group-hover:opacity-80 transition-opacity" />
-                                            </div>
-
-                                            <div className="relative z-10 p-8 flex flex-col h-full w-full">
-                                                <div className="flex items-center justify-between mb-8">
-                                                    <div
-                                                        className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-xl transform group-hover:-rotate-12 transition-all duration-500 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl"
-                                                        style={{ color: theme.color }}
-                                                    >
-                                                        <BrainCircuit className="w-8 h-8" />
-                                                    </div>
-                                                    <div className="w-10 h-10 rounded-full bg-slate-100/50 dark:bg-slate-800/50 backdrop-blur-md flex items-center justify-center group-hover:bg-indigo-500 transition-all shadow-sm group-hover:scale-110">
-                                                        <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors" />
-                                                    </div>
-                                                </div>
-
-                                                <div className="mt-auto">
-                                                    <h3 className="font-black text-3xl text-gray-900 dark:text-white tracking-tighter mb-2 group-hover:translate-x-2 transition-transform">
-                                                        {subject.name}
-                                                    </h3>
-                                                    <div className="flex items-center gap-2 group-hover:translate-x-2 transition-transform delay-75">
-                                                        <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: theme.color }} />
-                                                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-                                                            {subject.questionsCount} Practice Questions
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </button>
-                                    </motion.div>
+                                        title={subject.name}
+                                        eyebrow={`${selectedExam.name} domain`}
+                                        description="Exam-pattern practice with adaptive difficulty and live performance tracking."
+                                        meta={`${subject.questionsCount} practice questions`}
+                                        icon={<BrainCircuit className="h-5 w-5" />}
+                                        accent={theme.color}
+                                        image={bgUrl}
+                                        index={i}
+                                        badge={flowType === 'mock' ? 'Mock track' : 'Subject'}
+                                        onClick={() => handleSubjectSelect(subject)}
+                                    />
                                 );
                             })}
                         </div>
@@ -582,8 +755,8 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 1.05 }}
                     >
-                        <div className="mb-10 p-10 rounded-[3rem] bg-white dark:bg-slate-900/50 border-2 border-slate-100 dark:border-slate-800 shadow-2xl shadow-indigo-500/5 relative overflow-hidden group">
-                            <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-indigo-500/5 rounded-full blur-[100px] -mr-48 -mt-48 transition-transform duration-1000 group-hover:scale-150" />
+                        <div className="comp-surface-card group relative mb-10 overflow-hidden p-6 sm:p-10">
+                            <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-orange-500/5 rounded-full blur-[100px] -mr-48 -mt-48 transition-transform duration-1000 group-hover:scale-150" />
                             <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
                                 <div className="max-w-xl">
                                     <div className="flex items-center gap-3 mb-4">
@@ -609,49 +782,23 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
                             {selectedExam.papers.map((paper: Paper, i: number) => {
                                 const theme = EXAM_THEMES[selectedExam?.id || 'gate'];
                                 return (
-                                    <motion.div
-                                        key={paper.year}
-                                        initial={{ opacity: 0, y: 20 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ delay: i * 0.05, type: 'spring', damping: 20 }}
-                                    >
-                                        <button
-                                            onClick={() => handlePaperSelect(paper)}
-                                            className="w-full relative p-8 rounded-[2.5rem] bg-white dark:bg-slate-900 border-2 border-transparent text-center group overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 flex flex-col items-center justify-center"
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.borderColor = `${theme.color}40`;
-                                                e.currentTarget.style.transform = 'translateY(-8px) scale(1.02)';
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.borderColor = 'transparent';
-                                                e.currentTarget.style.transform = 'translateY(0) scale(1)';
-                                            }}
-                                        >
-                                            <div className="absolute top-0 left-0 w-full h-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" style={{ backgroundColor: theme.color }} />
-                                            
-                                            <div 
-                                                className="w-16 h-16 rounded-3xl flex items-center justify-center mb-6 transition-all duration-700 group-hover:rotate-[360deg] shadow-lg border border-slate-100 dark:border-slate-800"
-                                                style={{ backgroundColor: `${theme.color}10`, color: theme.color }}
-                                            >
-                                                <Calendar className="w-8 h-8" />
-                                            </div>
-
-                                            <span className="block font-black text-4xl text-gray-900 dark:text-white tracking-tighter mb-2 group-hover:scale-110 transition-transform">
-                                                {paper.year}
-                                            </span>
-                                            
-                                            <div className="px-4 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 group-hover:bg-indigo-500 group-hover:text-white transition-all shadow-sm">
-                                                Shift {paper.shift || '1'}
-                                            </div>
-                                            
-                                            {/* Hover decoration */}
-                                            <div className="absolute -bottom-1 -right-1 w-12 h-12 bg-indigo-500/5 rounded-full blur-xl opacity-0 group-hover:opacity-100 transition-opacity" />
-                                        </button>
-                                    </motion.div>
+                                    <PremiumSelectionCard
+                                        key={`${paper.year}-${paper.shift || '1'}`}
+                                        title={String(paper.year)}
+                                        eyebrow="Previous year paper"
+                                        description={`${selectedExam.name} official-pattern archive for timed simulation.`}
+                                        meta={`Shift ${paper.shift || '1'} · ${selectedExam.timeMinutes} minutes`}
+                                        icon={<Calendar className="h-5 w-5" />}
+                                        accent={theme.color}
+                                        index={i}
+                                        compact
+                                        badge="PYQ"
+                                        onClick={() => handlePaperSelect(paper)}
+                                    />
                                 );
                             })}
                         </div>
@@ -685,7 +832,7 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                             onSaveAndNext={handleSaveAndNext}
                             onMarkAndNext={handleMarkAndNext}
                             onPrevious={handlePrevious}
-                            onSubmit={() => setStep('result')}
+                            onSubmit={() => goToStep('result')}
                             onToggleEliminate={handleToggleEliminate}
                             onToggleBookmark={handleToggleBookmark}
                             onNoteChange={handleNoteChange}
@@ -695,290 +842,270 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
 
                 {/* Step 6: Result Screen */}
                 {step === 'result' && (
-                    <div className="space-y-12 transition-all duration-500 opacity-100">
-                        <div
-                            className="rounded-[3rem] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.15)] border border-white/60 dark:border-slate-700/50 p-10 sm:p-14 text-center relative overflow-hidden bg-white/80 dark:bg-slate-900/80 backdrop-blur-3xl"
+                    <div className="space-y-8 opacity-100 transition-all duration-500">
+                        <section
+                            className="exam-result-hero"
+                            style={{ '--result-accent': activeTheme.color } as React.CSSProperties}
                         >
-                            {/* Animated Background Artifacts */}
-                            <motion.div
-                                className="absolute -top-32 -right-32 w-96 h-96 rounded-full blur-[120px] pointer-events-none"
-                                style={{ backgroundColor: activeTheme.color, opacity: 0.15 }}
-                                animate={{ scale: [1, 1.2, 1], rotate: [0, 90, 0] }}
-                                transition={{ duration: 15, repeat: Infinity }}
-                            />
-                            <motion.div
-                                className="absolute -bottom-32 -left-32 w-96 h-96 rounded-full blur-[120px] pointer-events-none"
-                                style={{ backgroundColor: activeTheme.color, opacity: 0.1 }}
-                                animate={{ scale: [1.2, 1, 1.2], rotate: [0, -90, 0] }}
-                                transition={{ duration: 20, repeat: Infinity }}
-                            />
+                            <div className="exam-result-hero__glow" />
+                            <header className="exam-result-hero__header">
+                                <div className="exam-result-hero__status">
+                                    <span><Trophy className="h-4 w-4" /></span>
+                                    <div>
+                                        <p>Assessment completed</p>
+                                        <h2>Performance report</h2>
+                                    </div>
+                                </div>
+                                <div className="exam-result-hero__identity">
+                                    <span>{selectedExam?.name || 'Session'}</span>
+                                    <span>{selectedSubject?.name || 'Subject'}</span>
+                                    {selectedPaper?.year && <span>{selectedPaper.year}</span>}
+                                </div>
+                            </header>
 
-                            <div className="relative z-10 max-w-4xl mx-auto">
+                            <div className="exam-result-hero__body">
                                 <motion.div
-                                    className={`w-28 h-28 rounded-[2rem] flex items-center justify-center mx-auto mb-10 shadow-2xl border border-white/40 dark:border-white/10`}
-                                    initial={{ y: 30, rotate: -20, opacity: 0, scale: 0.8 }}
-                                    animate={{ y: 0, rotate: 0, opacity: 1, scale: 1 }}
-                                    transition={{ type: "spring", stiffness: 200, damping: 20, delay: 0.1 }}
-                                    style={{ 
-                                        background: `linear-gradient(135deg, ${activeTheme.color}, ${activeTheme.color}dd)`,
-                                        boxShadow: `0 20px 40px ${activeTheme.color}40, inset 0 2px 0 ${activeTheme.color}aa`
+                                    className="exam-score-dial"
+                                    initial={{ opacity: 0, scale: 0.82 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    transition={{ type: 'spring', stiffness: 180, damping: 20 }}
+                                    style={{
+                                        background: `conic-gradient(${activeTheme.color} ${accuracyPercent * 3.6}deg, color-mix(in srgb, ${activeTheme.color} 10%, transparent) 0deg)`,
                                     }}
                                 >
-                                    <Trophy className="w-14 h-14 text-white drop-shadow-md" />
-                                </motion.div>
-
-                                <motion.div
-                                    initial={{ y: 20, opacity: 0 }}
-                                    animate={{ y: 0, opacity: 1 }}
-                                    transition={{ delay: 0.2 }}
-                                >
-                                    <h2 className="text-4xl sm:text-6xl font-black text-gray-900 dark:text-white mb-6 tracking-tighter leading-tight drop-shadow-sm">
-                                        Performance Report
-                                    </h2>
-                                    <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-6 text-lg font-medium mb-14">
-                                        <span className="px-4 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold shadow-inner">
-                                            {selectedExam?.name || 'Session'}
-                                        </span>
-                                        <span className="hidden sm:inline text-slate-300 dark:text-slate-600">•</span>
-                                        <span className="px-4 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold shadow-inner">
-                                            {selectedSubject?.name || 'Subject'}
-                                        </span>
-                                        <span className="hidden sm:inline text-slate-300 dark:text-slate-600">•</span>
-                                        <span className="px-4 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold shadow-inner" style={{ color: activeTheme.color }}>
-                                            {selectedPaper?.year}
-                                        </span>
+                                    <div className="exam-score-dial__inner">
+                                        <span>Net score</span>
+                                        <strong>{rawScore}</strong>
+                                        <small>out of {maxScore}</small>
                                     </div>
                                 </motion.div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8 mb-16">
-                                    {[
-                                        { icon: <Target />, value: `${calculateScore()} / ${questions.length}`, label: 'Score Index', delay: 0.3 },
-                                        { icon: <CheckCircle />, value: `${Math.round((calculateScore() / questions.length) * 100)}%`, label: 'Accuracy Rate', delay: 0.4 },
-                                        { icon: <Clock />, value: formatTime(elapsedSeconds || Math.max(0, (selectedExam?.timeMinutes || 0) * 60 - timer)), label: 'Time Invested', delay: 0.5 }
-                                    ].map((stat, i) => (
-                                        <motion.div
-                                            key={i}
-                                            initial={{ y: 30, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            transition={{ delay: stat.delay, type: 'spring', damping: 20 }}
-                                            className="group relative p-8 rounded-[2.5rem] bg-white dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/60 flex flex-col items-center hover:scale-[1.03] transition-all duration-500 shadow-sm hover:shadow-xl overflow-hidden"
-                                        >
-                                            {/* Hover Glow */}
-                                            <div 
-                                                className="absolute inset-0 opacity-0 group-hover:opacity-[0.05] transition-opacity duration-500 pointer-events-none"
-                                                style={{ backgroundImage: `radial-gradient(circle at center, ${activeTheme.color}, transparent)` }}
-                                            />
-                                            
-                                            <div className="relative z-10 flex flex-col items-center">
-                                                <div 
-                                                    className="w-14 h-14 rounded-2xl flex items-center justify-center mb-5 transition-transform duration-500 group-hover:scale-110 shadow-sm border border-black/5 dark:border-white/10"
-                                                    style={{ backgroundColor: activeTheme.bgColor, color: activeTheme.color }}
-                                                >
-                                                    {React.cloneElement(stat.icon as React.ReactElement, { className: 'w-7 h-7' })}
-                                                </div>
-                                                <span className="text-4xl sm:text-5xl font-black mb-2 tracking-tighter tabular-nums text-gray-900 dark:text-white group-hover:text-transparent group-hover:bg-clip-text transition-colors duration-300"
-                                                    style={{ backgroundImage: `linear-gradient(to right, ${activeTheme.color}, ${activeTheme.color})`, WebkitBackgroundClip: 'text' }}>
-                                                    {stat.value}
-                                                </span>
-                                                <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">{stat.label}</span>
-                                            </div>
-                                        </motion.div>
-                                    ))}
+                                <div className="exam-result-summary">
+                                    <p className="exam-result-summary__eyebrow">AIra assessment intelligence</p>
+                                    <h3>
+                                        {accuracyPercent >= 80
+                                            ? 'Excellent command of this test.'
+                                            : accuracyPercent >= 60
+                                              ? 'Strong attempt with clear room to advance.'
+                                              : 'A useful baseline for your next focused revision.'}
+                                    </h3>
+                                    <p className="exam-result-summary__copy">
+                                        You attempted {attemptedCount} of {questions.length} questions with {accuracyPercent}% overall accuracy.
+                                        Review the answer analysis below to strengthen weak concepts.
+                                    </p>
+                                    <div className="exam-result-breakdown">
+                                        <div><span className="is-correct"><CheckCircle className="h-4 w-4" /></span><strong>{correctCount}</strong><small>Correct</small></div>
+                                        <div><span className="is-wrong"><XCircle className="h-4 w-4" /></span><strong>{incorrectCount}</strong><small>Incorrect</small></div>
+                                        <div><span className="is-skipped"><FileText className="h-4 w-4" /></span><strong>{unattemptedCount}</strong><small>Unattempted</small></div>
+                                    </div>
                                 </div>
-
-                                <motion.div 
-                                    className="flex flex-wrap items-center justify-center gap-6"
-                                    initial={{ opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: 0.6 }}
-                                >
-                                    <button onClick={() => { setStep('paper'); resetExam(); }} className="flex items-center gap-4 px-10 py-5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-[2rem] font-bold uppercase tracking-widest text-[11px] transition-all active:scale-95 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md">
-                                        <ArrowLeft className="w-4 h-4" /> Another Year
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled={isGenerating}
-                                        onClick={() => {
-                                            if (!selectedExam || !selectedSubject) return;
-                                            void (async () => {
-                                                resetExam();
-                                                await generateAndStartExam(
-                                                    selectedExam,
-                                                    selectedSubject,
-                                                    flowType === 'pyq' ? selectedPaper : null
-                                                );
-                                            })();
-                                        }}
-                                        className={`flex items-center gap-4 px-12 py-5 text-white rounded-[2rem] font-bold uppercase tracking-widest text-[11px] transition-all active:scale-95 shadow-xl hover:-translate-y-1 disabled:opacity-50 disabled:pointer-events-none`}
-                                        style={{ background: `linear-gradient(to right, ${activeTheme.color}, ${activeTheme.color}dd)`, boxShadow: `0 15px 30px -10px ${activeTheme.color}80` }}
-                                    >
-                                        <RefreshCw className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} /> {isGenerating ? 'Generating…' : 'Retake Test'}
-                                    </button>
-                                </motion.div>
                             </div>
-                        </div>
+
+                            <div className="exam-result-metrics">
+                                <PremiumMetricCard
+                                    icon={<Target className="h-5 w-5" />}
+                                    value={`${accuracyPercent}%`}
+                                    label="Overall accuracy"
+                                    accent="#059669"
+                                    detail={`${correctCount} correct answers`}
+                                />
+                                <PremiumMetricCard
+                                    icon={<CheckCircle className="h-5 w-5" />}
+                                    value={`${attemptPercent}%`}
+                                    label="Attempt rate"
+                                    accent={activeTheme.color}
+                                    detail={`${attemptedCount} of ${questions.length} attempted`}
+                                />
+                                <PremiumMetricCard
+                                    icon={<Clock className="h-5 w-5" />}
+                                    value={formatTime(timeTakenSeconds)}
+                                    label="Time invested"
+                                    accent="#2563eb"
+                                    detail={`${questions.length ? Math.round(timeTakenSeconds / questions.length) : 0}s average per question`}
+                                />
+                            </div>
+
+                            <div className="exam-result-actions">
+                                <button type="button" onClick={exitToSelection} className="exam-result-actions__secondary">
+                                    <ArrowLeft className="h-4 w-4" /> Choose another test
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={isGenerating}
+                                    onClick={() => {
+                                        if (!selectedExam || !selectedSubject) return;
+                                        void (async () => {
+                                            resetExam();
+                                            await generateAndStartExam(
+                                                selectedExam,
+                                                selectedSubject,
+                                                flowType === 'pyq' ? selectedPaper : null
+                                            );
+                                        })();
+                                    }}
+                                    className="exam-result-actions__primary"
+                                >
+                                    <RefreshCw className={`h-4 w-4 ${isGenerating ? 'animate-spin' : ''}`} />
+                                    {isGenerating ? 'Generating…' : 'Retake assessment'}
+                                </button>
+                            </div>
+                        </section>
 
                         {/* Detailed Answer Sheet Section */}
-                        <div className="space-y-12">
-                            <div className="flex items-center gap-8 px-10">
-                                <div className="h-0.5 flex-1 bg-gradient-to-r from-transparent to-slate-200 dark:to-slate-800" />
-                                <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-500">
-                                        <FileText className="w-5 h-5" />
+                        <section className="answer-review-section">
+                            <header className="answer-review-header">
+                                <div className="answer-review-header__copy">
+                                    <span><FileText className="h-5 w-5" /></span>
+                                    <div>
+                                        <p>Response analysis</p>
+                                        <h3>Answer review</h3>
+                                        <small>Compare every response and study the reasoning behind the correct answer.</small>
                                     </div>
-                                    <h3 className="font-black text-gray-900 dark:text-white text-3xl tracking-tight">Step-by-Step Answer Sheet</h3>
                                 </div>
-                                <div className="h-0.5 flex-1 bg-gradient-to-l from-transparent to-slate-200 dark:to-slate-800" />
-                            </div>
-
-                            <div className="grid grid-cols-1 gap-12">
-                                {questions.map((q: Question, idx: number) => {
-                                    const isCorrect = userAnswers[idx] === q.correctAnswer;
-                                    const explanationSteps = (q.explanation || "").split('\n').filter((step: string) => step.trim().length > 0);
-
-                                    return (
-                                        <motion.div
-                                            key={q.id}
-                                            initial={{ opacity: 0, y: 30 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ delay: idx * 0.1, type: "spring", damping: 25 }}
-                                            className={`group p-8 sm:p-10 rounded-[3rem] bg-white dark:bg-slate-900 border-2 transition-all hover:shadow-xl ${isCorrect
-                                                ? 'border-emerald-500/20 hover:border-emerald-500/40'
-                                                : 'border-rose-500/20 hover:border-rose-500/40'
-                                                }`}
+                                <div className="answer-review-filters" role="tablist" aria-label="Filter reviewed answers">
+                                    {([
+                                        ['all', 'All', questions.length],
+                                        ['correct', 'Correct', correctCount],
+                                        ['incorrect', 'Incorrect', incorrectCount],
+                                        ['unattempted', 'Skipped', unattemptedCount],
+                                    ] as const).map(([value, label, count]) => (
+                                        <button
+                                            key={value}
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={reviewFilter === value}
+                                            onClick={() => setReviewFilter(value)}
+                                            className={reviewFilter === value ? 'is-active' : ''}
                                         >
-                                            <div className="flex flex-col md:flex-row justify-between items-start gap-8 mb-10">
-                                                <div className="flex-1">
-                                                    <div className="flex items-center gap-3 mb-4">
-                                                        <span className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] ${isCorrect ? 'bg-emerald-500/10 text-emerald-600' : 'bg-rose-500/10 text-rose-600'}`}>
-                                                            Question {idx + 1}
+                                            <span>{label}</span>
+                                            <strong>{count}</strong>
+                                        </button>
+                                    ))}
+                                </div>
+                            </header>
+
+                            <AnimatePresence mode="popLayout">
+                                <div className="answer-review-list">
+                                    {reviewItems.map(({ question: q, index: idx, status }, position) => {
+                                        const explanationSteps = (q.explanation || '')
+                                            .split('\n')
+                                            .map((item) => item.trim())
+                                            .filter(Boolean);
+                                        const stepsToRender = explanationSteps.length
+                                            ? explanationSteps
+                                            : ['Review the core concept and compare each option before selecting the final answer.'];
+                                        const selectedAnswer = userAnswers[idx];
+
+                                        return (
+                                            <motion.article
+                                                layout
+                                                key={q.id}
+                                                initial={{ opacity: 0, y: 18 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                exit={{ opacity: 0, scale: 0.98 }}
+                                                transition={{ delay: Math.min(position * 0.045, 0.25), type: 'spring', damping: 24 }}
+                                                className={`answer-review-card answer-review-card--${status}`}
+                                            >
+                                                <div className="answer-review-card__rail" />
+                                                <header className="answer-review-card__header">
+                                                    <div className="answer-review-card__labels">
+                                                        <span className="answer-review-card__number">Question {idx + 1}</span>
+                                                        <span className={`answer-review-card__status answer-review-card__status--${status}`}>
+                                                            {status === 'correct' ? <CheckCircle className="h-3.5 w-3.5" /> : status === 'incorrect' ? <XCircle className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                                                            {status === 'correct' ? 'Correct' : status === 'incorrect' ? 'Incorrect' : 'Unattempted'}
                                                         </span>
-                                                        <span className="px-4 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-gray-400 text-[10px] font-black uppercase tracking-[0.2em]">
-                                                            {q.difficulty}
-                                                        </span>
+                                                        <span className="answer-review-card__difficulty">{q.difficulty}</span>
                                                     </div>
-                                                    <h4 className="font-black text-2xl sm:text-3xl text-gray-900 dark:text-slate-100 leading-[1.25] tracking-tight">{q.text}</h4>
+                                                    <span className="answer-review-card__marks">
+                                                        {status === 'correct' ? '+4 marks' : status === 'incorrect' ? '−1 mark' : '0 marks'}
+                                                    </span>
+                                                </header>
+
+                                                <div className="answer-review-card__question">
+                                                    <p>{q.subjectName || selectedSubject?.name} · {q.topic}</p>
+                                                    <h4>{q.text}</h4>
                                                 </div>
 
-                                                <motion.div
-                                                    className={`w-16 h-16 rounded-2xl flex items-center justify-center shrink-0 shadow-lg ${isCorrect ? 'bg-emerald-500 text-white shadow-emerald-500/30' : 'bg-rose-500 text-white shadow-rose-500/30'}`}
-                                                    whileHover={{ rotate: 360, scale: 1.1 }}
-                                                    transition={{ duration: 0.8, ease: "anticipate" }}
-                                                >
-                                                    {isCorrect ? <CheckCircle className="w-8 h-8" /> : <XCircle className="w-8 h-8" />}
-                                                </motion.div>
-                                            </div>
-
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-                                                <div className={`p-8 rounded-[2rem] border-2 shadow-sm transition-all relative overflow-hidden ${isCorrect
-                                                    ? 'bg-emerald-500/5 dark:bg-emerald-500/5 border-emerald-500/20'
-                                                    : 'bg-rose-500/5 dark:bg-rose-500/5 border-rose-500/20'
-                                                    }`}>
-                                                    <span className="text-[10px] font-black uppercase tracking-[0.3em] block mb-3 opacity-40">Your Selection</span>
-                                                    <div className="flex items-center gap-4">
-                                                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-black ${isCorrect ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'}`}>
-                                                            {userAnswers[idx] !== -1 ? String.fromCharCode(65 + userAnswers[idx]) : '?'}
+                                                <div className="answer-comparison">
+                                                    <div className={`answer-comparison__item answer-comparison__item--${status}`}>
+                                                        <div className="answer-comparison__label">
+                                                            <span>Your response</span>
+                                                            <small>{status === 'correct' ? 'Matched' : status === 'incorrect' ? 'Needs review' : 'Not answered'}</small>
                                                         </div>
-                                                        <span className={`text-xl font-bold ${isCorrect ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'}`}>
-                                                            {userAnswers[idx] !== -1 ? q.options[userAnswers[idx]] : 'Unattempted'}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                <div className="p-8 rounded-[2rem] border-2 bg-emerald-500/5 dark:bg-emerald-500/5 border-emerald-500/20 shadow-sm relative overflow-hidden">
-                                                    <span className="text-[10px] font-black uppercase tracking-[0.3em] block mb-3 opacity-40">Correct Solution</span>
-                                                    <div className="flex items-center gap-4">
-                                                        <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-sm font-black">
-                                                            {String.fromCharCode(65 + q.correctAnswer)}
+                                                        <div className="answer-comparison__answer">
+                                                            <strong>{selectedAnswer !== -1 ? String.fromCharCode(65 + selectedAnswer) : '—'}</strong>
+                                                            <span>{selectedAnswer !== -1 ? q.options[selectedAnswer] : 'No option selected'}</span>
                                                         </div>
-                                                        <span className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
-                                                            {q.options[q.correctAnswer]}
-                                                        </span>
                                                     </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="bg-slate-50 dark:bg-slate-800/50 p-8 sm:p-10 rounded-[3rem] border border-slate-200 dark:border-slate-800 relative overflow-hidden">
-                                                <div className="flex items-center gap-4 mb-8 relative z-10">
-                                                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg" style={{ backgroundColor: activeTheme.color }}>
-                                                        <Brain className="w-5 h-5" />
-                                                    </div>
-                                                    <div>
-                                                        <h5 className="text-[10px] font-black uppercase tracking-[0.3em]" style={{ color: activeTheme.color }}>Detailed Explanation</h5>
-                                                        <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Step-by-step logic</p>
+                                                    <div className="answer-comparison__item answer-comparison__item--solution">
+                                                        <div className="answer-comparison__label">
+                                                            <span>Correct answer</span>
+                                                            <small>Verified solution</small>
+                                                        </div>
+                                                        <div className="answer-comparison__answer">
+                                                            <strong>{String.fromCharCode(65 + q.correctAnswer)}</strong>
+                                                            <span>{q.options[q.correctAnswer]}</span>
+                                                        </div>
                                                     </div>
                                                 </div>
 
-                                                <div className="space-y-6 relative z-10">
-                                                    {explanationSteps.map((stepText: string, sIdx: number) => (
-                                                        <motion.div
-                                                            key={sIdx}
-                                                            className="flex gap-6 group/step"
-                                                            initial={{ opacity: 0, x: -10 }}
-                                                            whileInView={{ opacity: 1, x: 0 }}
-                                                            viewport={{ once: true }}
-                                                            transition={{ delay: 0.1 * sIdx }}
-                                                        >
-                                                            <div className="flex flex-col items-center gap-2">
-                                                                <div
-                                                                    className="w-6 h-6 rounded-full bg-white dark:bg-slate-900 border-2 flex items-center justify-center text-[10px] font-black shrink-0 transition-all"
-                                                                    style={{ borderColor: `${activeTheme.color}30`, color: activeTheme.color }}
-                                                                >
-                                                                    {sIdx + 1}
-                                                                </div>
-                                                                {sIdx < explanationSteps.length - 1 && (
-                                                                    <div className="w-0.5 h-full opacity-20" style={{ backgroundColor: activeTheme.color }} />
-                                                                )}
+                                                <div className="answer-explanation">
+                                                    <header className="answer-explanation__header">
+                                                        <span style={{ backgroundColor: activeTheme.color }}><Brain className="h-5 w-5" /></span>
+                                                        <div>
+                                                            <p style={{ color: activeTheme.color }}>Expert explanation</p>
+                                                            <h5>Understand the reasoning</h5>
+                                                        </div>
+                                                        <span className="answer-explanation__step-count">{stepsToRender.length} steps</span>
+                                                    </header>
+
+                                                    <div className="answer-explanation__steps">
+                                                        {stepsToRender.map((stepText, stepIndex) => (
+                                                            <div key={`${q.id}-step-${stepIndex}`} className="answer-explanation__step">
+                                                                <span style={{ color: activeTheme.color, borderColor: `${activeTheme.color}35` }}>
+                                                                    {stepIndex + 1}
+                                                                </span>
+                                                                <p>{stepText}</p>
                                                             </div>
-                                                            <p className="text-lg font-medium leading-[1.6] text-slate-700 dark:text-slate-300 antialiased pt-0.5">
-                                                                {stepText.trim()}
-                                                            </p>
-                                                        </motion.div>
-                                                    ))}
-                                                </div>
+                                                        ))}
+                                                    </div>
 
-                                                {/* Background Decorative Element */}
-                                                <div className="absolute top-0 right-0 p-8 opacity-[0.03] dark:opacity-[0.05]">
-                                                    <Sparkles className="w-24 h-24" style={{ color: activeTheme.color }} />
-                                                </div>
-                                                
-                                                {/* Explain with AI Button */}
-                                                <div className="mt-8 pt-8 border-t border-slate-200/60 dark:border-slate-800/60 relative z-10 flex justify-end">
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            // MUST strip the non-serializable React Node (icon) to prevent DataCloneError
-                                                            const { icon: _icon, ...serializableTheme } = activeTheme;
-                                                            void _icon;
-                                                            navigate('/student/competitive-explain', { 
-                                                                state: { 
-                                                                    competitiveQuestion: q, 
+                                                    <footer className="answer-explanation__footer">
+                                                        <div>
+                                                            <Sparkles className="h-4 w-4" style={{ color: activeTheme.color }} />
+                                                            <span>Need a lecturer-style walkthrough?</span>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const { icon: _icon, ...serializableTheme } = activeTheme;
+                                                                void _icon;
+                                                                const payload = {
+                                                                    competitiveQuestion: q,
                                                                     theme: serializableTheme,
                                                                     userAnswer: userAnswers[idx],
-                                                                    examName: selectedExam?.name
-                                                                } 
-                                                            });
-                                                        }}
-                                                        className="group flex items-center justify-center gap-3 px-8 py-4 rounded-2xl text-white font-bold relative overflow-hidden shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
-                                                        style={{ 
-                                                            background: `linear-gradient(135deg, ${activeTheme.color}, ${activeTheme.color}ee)`,
-                                                            boxShadow: `0 10px 25px -5px ${activeTheme.color}50`
-                                                        }}
-                                                    >
-                                                        {/* Sparkle shine effect */}
-                                                        <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12" />
-                                                        
-                                                        <Sparkles className="w-5 h-5 relative z-10 drop-shadow-sm" />
-                                                        <span className="relative z-10 tracking-wide text-[15px]">Explain with AI</span>
-                                                        <ChevronRight className="w-4 h-4 relative z-10 opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
-                                                    </button>
+                                                                    examName: selectedExam?.name,
+                                                                    returnTo: `${location.pathname}${location.search}`,
+                                                                };
+                                                                // Mirrored to session storage so reloading the
+                                                                // explanation page keeps its question.
+                                                                saveExplainPayload(payload);
+                                                                navigate('/student/competitive-explain', { state: payload });
+                                                            }}
+                                                            style={{ backgroundColor: activeTheme.color }}
+                                                        >
+                                                            <Sparkles className="h-4 w-4" />
+                                                            Explain with AI
+                                                            <ChevronRight className="h-4 w-4" />
+                                                        </button>
+                                                    </footer>
                                                 </div>
-                                            </div>
-                                        </motion.div>
-                                    );
-                                })}
-                            </div>
-                        </div>
+                                            </motion.article>
+                                        );
+                                    })}
+                                </div>
+                            </AnimatePresence>
+                        </section>
                     </div>
                 )}
             </div>

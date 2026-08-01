@@ -1,12 +1,20 @@
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Trophy } from 'lucide-react';
 import { studentRoutes } from '../utils/routes';
+import { writeStudentHomeHint } from '../lib/sessionHints';
 import PageTransition from '../components/common/PageTransition';
 import CompetitiveDashboard from '../components/competitive/CompetitiveDashboard';
 import AiraLogo from '../components/brand/AiraLogo';
 
 export default function StudentCompetitivePage() {
   const navigate = useNavigate();
+
+  // Arriving here by any route (deep link, refresh, bookmark) is a mode choice,
+  // so sign-in and the tutor's root redirect return here next time.
+  useEffect(() => {
+    writeStudentHomeHint(studentRoutes.competitive);
+  }, []);
 
   return (
     <PageTransition>

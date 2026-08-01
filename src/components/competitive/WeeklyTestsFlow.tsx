@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { CalendarDays, Flame, Play, Sparkles } from 'lucide-react';
+import { CalendarDays, Flame, Gauge, Play, Sparkles, TimerReset } from 'lucide-react';
 import { COMPETITIVE_EXAMS } from '../../data/mockData';
-import { EXAM_THEMES } from '../../data/examThemes';
+import { EXAM_IMAGES, EXAM_THEMES } from '../../data/examThemes';
 import ExamFlow from './ExamFlow';
+import { PremiumSelectionCard } from './CompetitiveCards';
 
 const WEEKLY_CHALLENGES = [
     {
@@ -34,7 +36,23 @@ interface WeeklyTestsFlowProps {
 }
 
 export default function WeeklyTestsFlow({ onExamStateChange }: WeeklyTestsFlowProps) {
-    const [launching, setLaunching] = useState(false);
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    // The launched challenge is part of the URL so a refresh stays in the test.
+    const challengeId = searchParams.get('challenge');
+    const activeChallenge = WEEKLY_CHALLENGES.find((c) => c.id === challengeId) ?? null;
+
+    const launchChallenge = useCallback(
+        (id: string) => {
+            setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.set('challenge', id);
+                return next;
+            });
+        },
+        [setSearchParams],
+    );
+
     const weekLabel = useMemo(() => {
         const now = new Date();
         const start = new Date(now);
@@ -42,7 +60,7 @@ export default function WeeklyTestsFlow({ onExamStateChange }: WeeklyTestsFlowPr
         return start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     }, []);
 
-    if (launching) {
+    if (activeChallenge) {
         return (
             <ExamFlow
                 isDashboardView
@@ -87,42 +105,37 @@ export default function WeeklyTestsFlow({ onExamStateChange }: WeeklyTestsFlowPr
                     const exam = COMPETITIVE_EXAMS.find((e) => e.id === challenge.examId);
                     const theme = EXAM_THEMES[challenge.examId] || EXAM_THEMES.gate;
                     return (
-                        <motion.article
+                        <motion.div
                             key={challenge.id}
                             initial={{ opacity: 0, y: 16 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.08 }}
-                            className="group flex flex-col rounded-3xl border border-slate-200/70 bg-white p-5 shadow-lg shadow-slate-200/40 dark:border-slate-700/50 dark:bg-slate-900 dark:shadow-black/20"
                         >
-                            <div className="mb-4 flex items-start justify-between">
-                                <span
-                                    className="rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white"
-                                    style={{ backgroundColor: theme.color }}
-                                >
-                                    {challenge.badge}
-                                </span>
-                                <Sparkles className="h-4 w-4 text-slate-300 transition group-hover:text-amber-500" />
-                            </div>
-                            <h3 className="text-xl font-black tracking-tight text-slate-900 dark:text-white">
-                                {challenge.title}
-                            </h3>
-                            <p className="mt-2 flex-1 text-sm text-slate-500 dark:text-slate-400">
-                                {challenge.blurb}
-                            </p>
-                            <p className="mt-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                Anchored to {exam?.name || challenge.examId}
-                            </p>
-                            <button
-                                type="button"
-                                onClick={() => setLaunching(true)}
-                                className="mt-5 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-[0.14em] text-white transition hover:-translate-y-0.5"
-                                style={{
-                                    background: `linear-gradient(90deg, ${theme.color}, ${theme.color}bb)`,
-                                }}
-                            >
-                                <Play className="h-4 w-4" /> Start challenge
-                            </button>
-                        </motion.article>
+                            <PremiumSelectionCard
+                                title={challenge.title}
+                                eyebrow={exam?.name || challenge.examId}
+                                description={challenge.blurb}
+                                meta={
+                                    <span className="inline-flex items-center gap-2">
+                                        <Play className="h-3.5 w-3.5" />
+                                        Launch assessment
+                                    </span>
+                                }
+                                icon={
+                                    challenge.id === 'speed-sprint' ? (
+                                        <TimerReset className="h-5 w-5" />
+                                    ) : challenge.id === 'accuracy-lab' ? (
+                                        <Gauge className="h-5 w-5" />
+                                    ) : (
+                                        <Sparkles className="h-5 w-5" />
+                                    )
+                                }
+                                accent={theme.color}
+                                image={EXAM_IMAGES[challenge.examId]}
+                                badge={challenge.badge}
+                                onClick={() => launchChallenge(challenge.id)}
+                            />
+                        </motion.div>
                     );
                 })}
             </div>

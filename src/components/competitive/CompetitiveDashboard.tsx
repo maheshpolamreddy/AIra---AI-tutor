@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     LayoutDashboard,
@@ -18,6 +19,7 @@ import TopicQuizzesFlow from './TopicQuizzesFlow';
 import QuestionaryExplanationFlow from './QuestionaryExplanationFlow';
 import PerformanceAnalytics from './PerformanceAnalytics';
 import WeeklyTestsFlow from './WeeklyTestsFlow';
+import { FLOW_PARAMS, SECTION_PARAM, normalizeSection } from '../../lib/competitiveRoute';
 
 const SIDEBAR_ITEMS = [
     { id: 'exams', label: 'Available Exams', icon: LayoutDashboard, hint: 'Catalog' },
@@ -30,9 +32,42 @@ const SIDEBAR_ITEMS = [
 ] as const;
 
 export default function CompetitiveDashboard() {
-    const [activeSection, setActiveSection] = useState<(typeof SIDEBAR_ITEMS)[number]['id']>('exams');
+    const [searchParams, setSearchParams] = useSearchParams();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isExamActive, setIsExamActive] = useState(false);
+
+    // The active section lives in the URL so refresh, deep links and the browser
+    // back button all resolve to the screen the student was actually on.
+    const activeSection = normalizeSection(searchParams.get(SECTION_PARAM));
+
+    // Normalise an unknown or missing `section` without adding a history entry.
+    useEffect(() => {
+        const raw = searchParams.get(SECTION_PARAM);
+        if (raw === activeSection) return;
+        setSearchParams(
+            (prev) => {
+                const next = new URLSearchParams(prev);
+                next.set(SECTION_PARAM, activeSection);
+                return next;
+            },
+            { replace: true },
+        );
+    }, [activeSection, searchParams, setSearchParams]);
+
+    const selectSection = useCallback(
+        (sectionId: (typeof SIDEBAR_ITEMS)[number]['id']) => {
+            setIsMobileMenuOpen(false);
+            if (sectionId === activeSection) return;
+            setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.set(SECTION_PARAM, sectionId);
+                // Flow params belong to the section being left behind.
+                FLOW_PARAMS.forEach((param) => next.delete(param));
+                return next;
+            });
+        },
+        [activeSection, setSearchParams],
+    );
 
     const active = SIDEBAR_ITEMS.find((i) => i.id === activeSection) || SIDEBAR_ITEMS[0];
     const ActiveIcon = active.icon;
@@ -93,10 +128,7 @@ export default function CompetitiveDashboard() {
                                 <button
                                     key={item.id}
                                     type="button"
-                                    onClick={() => {
-                                        setActiveSection(item.id);
-                                        setIsMobileMenuOpen(false);
-                                    }}
+                                    onClick={() => selectSection(item.id)}
                                     className={`group relative flex w-full items-center gap-3 overflow-hidden rounded-2xl px-3.5 py-3.5 transition-all ${
                                         isActive
                                             ? 'bg-gradient-to-r from-orange-500/15 via-amber-500/10 to-transparent font-bold text-orange-800 shadow-sm dark:text-orange-200'

@@ -1,15 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import type { LucideIcon } from 'lucide-react';
 import {
     ArrowLeft, ChevronLeft, ChevronRight, Volume2, VolumeX,
     CheckCircle2, BookOpen, BrainCircuit, Lightbulb,
     FlaskConical, Calculator, Target, RefreshCw, Loader2,
-    PlayCircle, BarChart3, HelpCircle, XCircle
+    PlayCircle, BarChart3, HelpCircle, XCircle, Settings2, Ruler
 } from 'lucide-react';
 import { aiService } from '../services/aiService';
 import { useSpeech } from '../hooks/useSpeech';
 import { useTeachingStore } from '../stores/teachingStore';
+import { studentRoutes } from '../utils/routes';
+import { loadExplainPayload, saveExplainPayload, type ExplainPayload } from '../lib/competitiveRoute';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface CompetitiveQuestion {
@@ -40,6 +43,23 @@ interface AITeachingStep {
     visualType: 'concept' | 'formula' | 'solution' | 'answer' | 'insight';
     icon: string;
     highlights?: string[];
+}
+
+function stepIconFor(visualType: AITeachingStep['visualType'] | string): LucideIcon {
+    switch (visualType) {
+        case 'concept':
+            return BrainCircuit;
+        case 'formula':
+            return Ruler;
+        case 'solution':
+            return Settings2;
+        case 'answer':
+            return CheckCircle2;
+        case 'insight':
+            return Lightbulb;
+        default:
+            return BookOpen;
+    }
 }
 
 // ─── Grade & Style Helper ───────────────────────────────────────────────────
@@ -109,13 +129,13 @@ function ConceptVisual({ question, themeColor }: { question: CompetitiveQuestion
         <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-sm"
+            className="comp-surface-card overflow-hidden"
             style={{ background: `linear-gradient(135deg, ${themeColor}15, ${themeColor}05)` }}
         >
             <div className="p-6">
                 <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-lg" style={{ backgroundColor: themeColor }}>
-                        🧠
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white" style={{ backgroundColor: themeColor }}>
+                        <BrainCircuit className="h-5 w-5" />
                     </div>
                     <div>
                         <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Core Concept</p>
@@ -185,7 +205,7 @@ function SolutionVisual({ steps, themeColor, highlights }: { steps: string[]; th
                     initial={{ opacity: 0, x: -15 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: i * 0.1 }}
-                    className="flex gap-3 items-start p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm"
+                    className="comp-surface-card flex items-start gap-3 p-4"
                 >
                     <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-black flex-shrink-0 mt-0.5" style={{ backgroundColor: themeColor }}>
                         {i + 1}
@@ -261,8 +281,8 @@ function InsightVisual({ content, themeColor, highlights }: { content: string; t
         <motion.div
             initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-2xl p-5"
-            style={{ background: `linear-gradient(135deg, ${themeColor}12, ${themeColor}04)`, border: `1.5px solid ${themeColor}30` }}
+            className="comp-surface-card p-5"
+            style={{ background: `linear-gradient(135deg, ${themeColor}12, ${themeColor}04)`, borderColor: `${themeColor}30` }}
         >
             <div className="flex items-center gap-2 mb-4">
                 <Lightbulb className="w-5 h-5" style={{ color: themeColor }} />
@@ -271,7 +291,7 @@ function InsightVisual({ content, themeColor, highlights }: { content: string; t
             <div className="space-y-3">
                 {displayItems.map((item, i) => (
                     <div key={i} className="flex gap-3 p-3 rounded-xl bg-white/60 dark:bg-slate-800/60">
-                        <span className="text-base flex-shrink-0">💡</span>
+                        <Lightbulb className="h-4 w-4 shrink-0 mt-0.5" style={{ color: themeColor }} />
                         <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
                             {highlightText(item, highlights, themeColor)}
                         </p>
@@ -562,16 +582,36 @@ function buildStaticSteps(
 export default function CompetitiveTeachingPage() {
     const location = useLocation();
     const navigate = useNavigate();
-    const stateData = location.state as { 
-        competitiveQuestion?: CompetitiveQuestion; 
+    type ExplainState = {
+        competitiveQuestion?: CompetitiveQuestion;
         theme?: ThemeConfig;
         userAnswer?: number;
         examName?: string;
-    } | null;
+        returnTo?: string;
+    };
+
+    /**
+     * Router state is lost on a hard reload, so the payload is mirrored into
+     * session storage when the lesson is opened and read back here.
+     */
+    const stateData = useMemo<ExplainState | null>(() => {
+        const routerState = location.state as ExplainState | null;
+        if (routerState?.competitiveQuestion) {
+            saveExplainPayload(routerState as ExplainPayload);
+            return routerState;
+        }
+        return (loadExplainPayload() as ExplainState | null) ?? null;
+    }, [location.state]);
+
     const question = stateData?.competitiveQuestion;
-    const theme = stateData?.theme || { color: '#6366f1', bgColor: 'rgba(99,102,241,0.15)', gradient: 'from-indigo-500 to-purple-600' };
+    const theme = stateData?.theme || { color: '#ea580c', bgColor: 'rgba(234,88,12,0.15)', gradient: 'from-orange-500 to-amber-600' };
     const userAnswer = stateData?.userAnswer;
     const examName = stateData?.examName;
+
+    /** Always resolves to a real competitive screen, never off the app. */
+    const goBackToCompetitive = useCallback(() => {
+        navigate(stateData?.returnTo || studentRoutes.competitive, { replace: true });
+    }, [navigate, stateData?.returnTo]);
 
     const [steps, setSteps] = useState<AITeachingStep[]>([]);
     const [isGenerating, setIsGenerating] = useState(true);
@@ -630,8 +670,8 @@ export default function CompetitiveTeachingPage() {
                     </div>
                     <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-2">No Question Found</h2>
                     <p className="text-slate-500 dark:text-slate-400 mb-6">Please go back and select a question to explain.</p>
-                    <button onClick={() => navigate(-1)} className="px-8 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/30">
-                        Go Back
+                    <button onClick={goBackToCompetitive} className="rounded-2xl bg-orange-600 px-8 py-3 font-bold text-white shadow-lg shadow-orange-500/30 transition-colors hover:bg-orange-700">
+                        Back to Competitive
                     </button>
                 </div>
             </div>
@@ -687,34 +727,34 @@ export default function CompetitiveTeachingPage() {
     }
 
     return (
-        <div className="min-h-screen flex flex-col">
+        <div className="competitive-mode relative flex min-h-screen flex-col">
 
             {/* ── Ambient Background ── */}
-            <div className="fixed inset-0 pointer-events-none">
+            <div className="pointer-events-none fixed inset-0">
                 <div
-                    className="absolute top-0 right-0 w-96 h-96 rounded-full blur-[120px] opacity-20"
+                    className="absolute right-0 top-0 h-96 w-96 rounded-full opacity-20 blur-[120px]"
                     style={{ background: theme.color }}
                 />
                 <div
-                    className="absolute bottom-0 left-0 w-64 h-64 rounded-full blur-[100px] opacity-10"
+                    className="absolute bottom-0 left-0 h-64 w-64 rounded-full opacity-10 blur-[100px]"
                     style={{ background: theme.color }}
                 />
             </div>
 
             {/* ── Header ── */}
-            <header className="sticky top-0 z-40 bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl border-b border-slate-200/80 dark:border-slate-800/80 px-4 sm:px-6 py-3">
-                <div className="max-w-5xl mx-auto flex items-center gap-3">
+            <header className="sticky top-0 z-40 border-b border-[var(--comp-border)] bg-[var(--comp-elevated)]/85 px-4 py-3 backdrop-blur-xl sm:px-6">
+                <div className="mx-auto flex max-w-5xl items-center gap-3">
                     <button
-                        onClick={() => { navigate(-1); }}
-                        className="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors font-semibold text-sm flex-shrink-0"
+                        onClick={goBackToCompetitive}
+                        className="flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                     >
                         <ArrowLeft className="w-4 h-4" />
                         <span className="hidden sm:inline">Back</span>
                     </button>
 
                     {/* Exam badge */}
-                    <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm flex-shrink-0" style={{ background: `linear-gradient(135deg, ${theme.color}, ${theme.color}cc)` }}>
-                        🎯
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white" style={{ background: `linear-gradient(135deg, ${theme.color}, ${theme.color}cc)` }}>
+                        <Target className="h-4 w-4" />
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -755,7 +795,7 @@ export default function CompetitiveTeachingPage() {
                     >
                         {isMuted
                             ? <VolumeX className="w-4 h-4" />
-                            : <Volume2 className={`w-4 h-4 ${isSpeaking ? 'text-indigo-500' : ''}`} />
+                            : <Volume2 className={`w-4 h-4 ${isSpeaking ? 'text-orange-500' : ''}`} />
                         }
                     </button>
                 </div>
@@ -793,7 +833,10 @@ export default function CompetitiveTeachingPage() {
                                 >
                                     {isDone
                                         ? <CheckCircle2 className="w-3 h-3" />
-                                        : <span className="text-[10px]">{step.icon}</span>
+                                        : (() => {
+                                            const StepIcon = stepIconFor(step.visualType);
+                                            return <StepIcon className="h-3 w-3" />;
+                                        })()
                                     }
                                     <span>{step.title}</span>
                                 </button>
@@ -821,10 +864,13 @@ export default function CompetitiveTeachingPage() {
                                     initial={{ scale: 0.5, rotate: -10 }}
                                     animate={{ scale: 1, rotate: 0 }}
                                     transition={{ type: 'spring', stiffness: 200 }}
-                                    className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center text-2xl sm:text-3xl shadow-lg flex-shrink-0"
+                                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-white shadow-lg sm:h-16 sm:w-16"
                                     style={{ background: `linear-gradient(135deg, ${theme.color}, ${theme.color}cc)` }}
                                 >
-                                    {currentStepData.icon}
+                                    {(() => {
+                                        const StepIcon = stepIconFor(currentStepData.visualType);
+                                        return <StepIcon className="h-6 w-6 sm:h-7 sm:w-7" />;
+                                    })()}
                                 </motion.div>
                                 <div className="flex-1 min-w-0 pt-1">
                                     <p className="text-[10px] sm:text-[11px] font-black uppercase tracking-widest mb-0.5" style={{ color: theme.color }}>
@@ -856,7 +902,7 @@ export default function CompetitiveTeachingPage() {
 
                                 {/* Left: Content (3/5 on large) */}
                                 <div className="lg:col-span-3">
-                                    <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-sm h-full">
+                                    <div className="comp-surface-card h-full p-6 sm:p-8">
                                         <ContentRenderer text={currentStepData.content} highlights={currentStepData.highlights} themeColor={theme.color} />
                                     </div>
                                 </div>
@@ -869,8 +915,8 @@ export default function CompetitiveTeachingPage() {
                                     {currentStepData.visualType === 'formula' && (
                                         <>
                                             {question && (
-                                                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
-                                                    <div className="flex items-center gap-2 mb-3">
+                                                <div className="comp-surface-card p-5">
+                                                    <div className="mb-3 flex items-center gap-2">
                                                         <BookOpen className="w-4 h-4" style={{ color: theme.color }} />
                                                         <span className="text-xs font-black uppercase tracking-widest" style={{ color: theme.color }}>The Question</span>
                                                     </div>
@@ -979,7 +1025,7 @@ export default function CompetitiveTeachingPage() {
                         </motion.button>
                     ) : (
                         <motion.button
-                            onClick={() => { navigate(-1); }}
+                            onClick={goBackToCompetitive}
                             whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.97 }}
                             className="flex items-center gap-2 px-6 py-3 rounded-2xl text-white font-bold text-sm shadow-lg transition-all"

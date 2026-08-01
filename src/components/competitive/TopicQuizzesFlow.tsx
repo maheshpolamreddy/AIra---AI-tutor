@@ -1,26 +1,86 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BookOpen, ChevronRight, FileText, ArrowLeft, Award, BrainCircuit, Clock } from 'lucide-react';
 import { schoolGrades } from '../../data/schoolCurriculum';
 import type { SchoolSubject, Chapter } from '../../types';
 import { Question } from '../../data/competitiveQuestions';
 import { aiExamGenerator } from '../../services/aiExamGenerator';
+import { PremiumMetricCard, PremiumSelectionCard } from './CompetitiveCards';
+import { clearQuizDraft, loadQuizDraft, saveQuizDraft, type QuizDraft } from '../../lib/competitiveRoute';
 
+type QuizStep = 'subject' | 'chapter' | 'solving' | 'result';
+
+function normalizeQuizStep(value: string | null): QuizStep {
+    return value === 'chapter' || value === 'solving' || value === 'result' ? value : 'subject';
+}
 
 export default function TopicQuizzesFlow() {
-    const [step, setStep] = useState<'subject' | 'chapter' | 'solving' | 'result'>('subject');
-    
+    const [searchParams, setSearchParams] = useSearchParams();
+
     // Defaulting to Class 12 Science for Competitive Topic Quizzes
     const defaultGrade = schoolGrades.find(g => g.id === 'grade-12-science') || schoolGrades[0];
-    const [selectedSubject, setSelectedSubject] = useState<SchoolSubject | null>(null);
-    const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
+
+    // Selection and step live in the URL so a refresh resumes the same quiz.
+    const step = normalizeQuizStep(searchParams.get('step'));
+    const selectedSubject = useMemo<SchoolSubject | null>(
+        () => defaultGrade?.subjects.find(s => s.id === searchParams.get('subject')) ?? null,
+        [defaultGrade, searchParams],
+    );
+    const selectedChapter = useMemo<Chapter | null>(
+        () => selectedSubject?.chapters.find(c => c.id === searchParams.get('chapter')) ?? null,
+        [selectedSubject, searchParams],
+    );
+
+    const updateParams = useCallback(
+        (updates: Record<string, string | null>, options: { replace?: boolean } = {}) => {
+            setSearchParams(
+                (prev) => {
+                    const next = new URLSearchParams(prev);
+                    Object.entries(updates).forEach(([key, value]) => {
+                        if (value === null) next.delete(key);
+                        else next.set(key, value);
+                    });
+                    return next;
+                },
+                { replace: options.replace ?? false },
+            );
+        },
+        [setSearchParams],
+    );
+
+    const goToStep = useCallback(
+        (next: QuizStep, updates: Record<string, string | null> = {}, options: { replace?: boolean } = {}) => {
+            const base: Record<string, string | null> =
+                next === 'subject' ? { step: null, subject: null, chapter: null } : { step: next };
+            updateParams({ ...base, ...updates }, options);
+        },
+        [updateParams],
+    );
+
+    // Generated questions cannot live in the URL, so a resumed tab reads them
+    // back from session storage on the very first render.
+    const initialDraftRef = useRef<QuizDraft | null | undefined>(undefined);
+    if (initialDraftRef.current === undefined) {
+        const params = new URLSearchParams(window.location.search);
+        const urlStep = normalizeQuizStep(params.get('step'));
+        const draft = urlStep === 'solving' || urlStep === 'result' ? loadQuizDraft() : null;
+        initialDraftRef.current =
+            draft && draft.subjectId === params.get('subject') && draft.chapterId === params.get('chapter')
+                ? draft
+                : null;
+    }
+    const initialDraft = initialDraftRef.current;
 
     // Quiz State
-    const [questions, setQuestions] = useState<Question[]>([]);
-    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-    const [userAnswers, setUserAnswers] = useState<number[]>([]);
-    const [showExplanation, setShowExplanation] = useState(false);
-    const [timer, setTimer] = useState(0);
+    const [questions, setQuestions] = useState<Question[]>(() => initialDraft?.questions ?? []);
+    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(() => initialDraft?.currentQuestionIndex ?? 0);
+    const [userAnswers, setUserAnswers] = useState<number[]>(() => initialDraft?.userAnswers ?? []);
+    const [showExplanation, setShowExplanation] = useState(() => {
+        const answer = initialDraft?.userAnswers?.[initialDraft?.currentQuestionIndex ?? 0];
+        return answer !== undefined && answer !== -1;
+    });
+    const [timer, setTimer] = useState(() => initialDraft?.timer ?? 0);
     const [isGenerating, setIsGenerating] = useState(false);
 
     // Timer Effect
@@ -32,46 +92,94 @@ export default function TopicQuizzesFlow() {
         return () => clearInterval(interval);
     }, [step]);
 
+    // Autosave so a reload keeps the generated quiz and the answers given so far
+    useEffect(() => {
+        if ((step !== 'solving' && step !== 'result') || !selectedSubject || !selectedChapter) return;
+        if (!questions.length) return;
+        saveQuizDraft({
+            version: 1,
+            subjectId: selectedSubject.id,
+            chapterId: selectedChapter.id,
+            step,
+            questions,
+            currentQuestionIndex,
+            userAnswers,
+            timer,
+            savedAt: Date.now(),
+        });
+    }, [step, selectedSubject, selectedChapter, questions, currentQuestionIndex, userAnswers, timer]);
+
+    // Repair URLs that cannot render — stale links or an expired quiz draft.
+    useEffect(() => {
+        if (isGenerating) return;
+        if (step === 'chapter' && !selectedSubject) {
+            goToStep('subject', {}, { replace: true });
+        } else if ((step === 'solving' || step === 'result') && !questions.length) {
+            goToStep(selectedSubject ? 'chapter' : 'subject', { chapter: null }, { replace: true });
+        }
+    }, [step, selectedSubject, questions.length, isGenerating, goToStep]);
+
+    const resetQuiz = useCallback(() => {
+        setQuestions([]);
+        setUserAnswers([]);
+        setCurrentQuestionIndex(0);
+        setShowExplanation(false);
+        setTimer(0);
+        clearQuizDraft();
+    }, []);
+
     const handleBack = () => {
         if (step === 'result') {
-            setStep('chapter');
+            resetQuiz();
+            goToStep('chapter', { chapter: null });
         } else if (step === 'solving') {
             const confirmQuit = window.confirm("Are you sure you want to quit the quiz? Progress will be lost.");
-            if (confirmQuit) setStep('chapter');
+            if (confirmQuit) {
+                resetQuiz();
+                goToStep('chapter', { chapter: null });
+            }
         } else if (step === 'chapter') {
-            setStep('subject');
+            goToStep('subject');
         }
     };
 
     const handleSubjectSelect = (subject: SchoolSubject) => {
-        setSelectedSubject(subject);
-        setStep('chapter');
+        goToStep('chapter', { subject: subject.id, chapter: null });
     };
 
     const handleChapterSelect = async (chapter: Chapter) => {
-        setSelectedChapter(chapter);
-        
-        if (selectedSubject) {
-            setIsGenerating(true);
-            try {
-                // Generate exactly 10 questions for this specific chapter using AI
-                const generatedQuiz = await aiExamGenerator.generateAITopicQuiz(
-                    selectedSubject.name,
-                    chapter.name,
-                    10
-                );
+        if (!selectedSubject) return;
+        updateParams({ chapter: chapter.id }, { replace: true });
+        setIsGenerating(true);
+        try {
+            // Generate exactly 10 questions for this specific chapter using AI
+            const generatedQuiz = await aiExamGenerator.generateAITopicQuiz(
+                selectedSubject.name,
+                chapter.name,
+                10
+            );
 
-                setQuestions(generatedQuiz);
-                setUserAnswers(new Array(generatedQuiz.length).fill(-1));
-                setCurrentQuestionIndex(0);
-                setShowExplanation(false);
-                setTimer(0);
-                setStep('solving');
-            } catch (error) {
-                console.error("Failed to generate topic quiz:", error);
-            } finally {
-                setIsGenerating(false);
-            }
+            setQuestions(generatedQuiz);
+            setUserAnswers(new Array(generatedQuiz.length).fill(-1));
+            setCurrentQuestionIndex(0);
+            setShowExplanation(false);
+            setTimer(0);
+            saveQuizDraft({
+                version: 1,
+                subjectId: selectedSubject.id,
+                chapterId: chapter.id,
+                step: 'solving',
+                questions: generatedQuiz,
+                currentQuestionIndex: 0,
+                userAnswers: new Array(generatedQuiz.length).fill(-1),
+                timer: 0,
+                savedAt: Date.now(),
+            });
+            goToStep('solving', { chapter: chapter.id });
+        } catch (error) {
+            console.error("Failed to generate topic quiz:", error);
+        } finally {
+            setIsGenerating(false);
         }
     };
 
@@ -126,9 +234,9 @@ export default function TopicQuizzesFlow() {
                         className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm"
                     >
                         <div className="w-20 h-20 mb-6 relative flex items-center justify-center">
-                            <div className="absolute inset-0 border-4 border-indigo-200 dark:border-indigo-900 rounded-full animate-ping opacity-75" />
-                            <div className="absolute inset-0 border-4 border-indigo-600 dark:border-indigo-400 rounded-full border-t-transparent animate-spin" />
-                            <BrainCircuit className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-pulse" />
+                            <div className="absolute inset-0 border-4 border-orange-200 dark:border-orange-900 rounded-full animate-ping opacity-75" />
+                            <div className="absolute inset-0 border-4 border-orange-600 dark:border-orange-400 rounded-full border-t-transparent animate-spin" />
+                            <BrainCircuit className="w-8 h-8 text-orange-600 dark:text-orange-400 animate-pulse" />
                         </div>
                         <h3 className="text-2xl font-black text-gray-900 dark:text-white mb-2 tracking-tight">Generating AI Topic Quiz...</h3>
                         <p className="text-sm font-medium text-gray-500 dark:text-slate-400 max-w-sm text-center">
@@ -170,70 +278,19 @@ export default function TopicQuizzesFlow() {
                                 const bgUrl = SUBJECT_IMAGES[subject.name.trim().toLowerCase()] || SUBJECT_IMAGES[subject.id.trim().toLowerCase()] || SUBJECT_IMAGES['default'];
 
                                 return (
-                                    <motion.button
+                                    <PremiumSelectionCard
                                         key={subject.id}
-                                        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                                        transition={{ delay: i * 0.1, type: 'spring', damping: 20 }}
+                                        title={subject.name}
+                                        eyebrow="Adaptive topic practice"
+                                        description="Chapter-level AI quizzes with instant answer analysis and exam-focused feedback."
+                                        meta={`${subject.chapters.length} syllabus topics`}
+                                        icon={<BrainCircuit className="h-5 w-5" />}
+                                        accent={subject.color}
+                                        image={bgUrl}
+                                        index={i}
+                                        badge="10 Q sets"
                                         onClick={() => handleSubjectSelect(subject)}
-                                        className="w-full relative overflow-hidden group rounded-[2rem] bg-white dark:bg-slate-900 border-2 text-left transition-all duration-500 shadow-sm hover:shadow-2xl flex flex-col min-h-[200px]"
-                                        style={{ borderColor: 'transparent' }}
-                                        onMouseEnter={(e) => {
-                                            e.currentTarget.style.borderColor = `${subject.color}40`;
-                                            e.currentTarget.style.transform = 'translateY(-6px) scale(1.02)';
-                                            e.currentTarget.style.boxShadow = `0 25px 50px -12px ${subject.color}30`;
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.currentTarget.style.borderColor = 'transparent';
-                                            e.currentTarget.style.transform = 'translateY(0) scale(1)';
-                                            e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.05)';
-                                        }}
-                                    >
-                                        {/* Background Image with optimized overlay */}
-                                        <div className="absolute inset-0 w-full h-full">
-                                            <div 
-                                                className="absolute inset-0 bg-cover bg-center transition-transform duration-1000 group-hover:scale-110"
-                                                style={{ backgroundImage: `url(${bgUrl})` }}
-                                            />
-                                            <div 
-                                                className="absolute inset-0 opacity-60 dark:opacity-80 transition-all duration-500 group-hover:opacity-40"
-                                                style={{ 
-                                                    background: `linear-gradient(135deg, white 0%, rgba(255,255,255,0.8) 50%, transparent 100%)` 
-                                                }}
-                                            />
-                                            {/* Dark mode adjustment for gradient */}
-                                            <div className="absolute inset-0 opacity-0 dark:opacity-80 hidden dark:block transition-all duration-500 group-hover:opacity-60"
-                                                 style={{ 
-                                                     background: `linear-gradient(135deg, #0f172a 0%, rgba(15,23,42,0.8) 50%, transparent 100%)` 
-                                                 }} />
-                                        </div>
-                                        
-                                        <div className="relative z-10 flex flex-col h-full p-6 w-full">
-                                            <div className="flex items-center justify-between mb-auto">
-                                                <div
-                                                    className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transform group-hover:-rotate-6 transition-all duration-500 bg-white dark:bg-slate-800`}
-                                                    style={{ color: subject.color }}
-                                                >
-                                                    <BrainCircuit className="w-6 h-6" />
-                                                </div>
-                                                <div className="w-9 h-9 rounded-full bg-white/50 dark:bg-slate-800/50 backdrop-blur-md flex items-center justify-center group-hover:bg-white dark:group-hover:bg-indigo-500 transition-all shadow-sm group-hover:scale-110">
-                                                    <ChevronRight className={`w-5 h-5 text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-white transition-colors`} />
-                                                </div>
-                                            </div>
-
-                                            <div className="mt-6">
-                                                <h3 className="font-black text-2xl text-gray-900 dark:text-white tracking-tight mb-2 group-hover:translate-x-1 transition-transform">
-                                                    {subject.name}
-                                                </h3>
-                                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200/50 dark:border-slate-700/50 w-fit group-hover:translate-x-1 transition-all">
-                                                    <FileText className="w-3.5 h-3.5 text-slate-400" />
-                                                    <span className="text-[10px] sm:text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                                                        {subject.chapters.length} Topics
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </motion.button>
+                                    />
                                 );
                             })}
                         </div>
@@ -263,31 +320,18 @@ export default function TopicQuizzesFlow() {
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                             {selectedSubject.chapters.map((chapter, i) => (
-                                <motion.button
+                                <PremiumSelectionCard
                                     key={chapter.id}
-                                    initial={{ opacity: 0, scale: 0.98 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    transition={{ delay: i * 0.05 }}
+                                    title={chapter.name}
+                                    eyebrow={`Chapter ${chapter.chapterNumber}`}
+                                    description="AI-generated exam questions with immediate explanations."
+                                    meta="10 questions · instant review"
+                                    icon={<FileText className="h-5 w-5" />}
+                                    accent={selectedSubject.color}
+                                    index={i}
+                                    compact
                                     onClick={() => handleChapterSelect(chapter)}
-                                    className="w-full relative flex items-center p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left hover:border-indigo-300 dark:hover:border-indigo-500/50 hover:shadow-md transition-all group overflow-hidden"
-                                >
-                                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                    
-                                    <div className="w-10 h-10 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 mr-4 shrink-0">
-                                        <FileText className="w-5 h-5" />
-                                    </div>
-                                    <div className="flex-1 min-w-0 pr-4">
-                                        <h4 className="font-bold text-gray-900 dark:text-white truncate">
-                                            {chapter.name}
-                                        </h4>
-                                        <div className="flex items-center gap-2 mt-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                            <span>Ch {chapter.chapterNumber}</span>
-                                            <span>•</span>
-                                            <span>10 Questions</span>
-                                        </div>
-                                    </div>
-                                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition-colors shrink-0" />
-                                </motion.button>
+                                />
                             ))}
                         </div>
                     </motion.div>
@@ -300,7 +344,7 @@ export default function TopicQuizzesFlow() {
                         initial={{ opacity: 0, scale: 0.98 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.98 }}
-                        className="w-full max-w-4xl mx-auto flex flex-col h-full min-h-[450px] sm:min-h-[600px] bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-slate-200 dark:border-slate-800 relative overflow-hidden"
+                        className="comp-surface-card relative mx-auto flex h-full min-h-[450px] w-full max-w-4xl flex-col overflow-hidden sm:min-h-[600px]"
                     >
                         {/* Header */}
                         <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900/50">
@@ -313,14 +357,14 @@ export default function TopicQuizzesFlow() {
                                     <p className="text-[10px] sm:text-xs text-slate-500">Question {currentQuestionIndex + 1} of {questions.length}</p>
                                 </div>
                             </div>
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-bold border border-indigo-100 dark:border-indigo-800 flex-shrink-0">
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 font-bold border border-orange-100 dark:border-orange-800 flex-shrink-0">
                                 <Clock className="w-3.5 h-3.5 sm:w-4 h-4" />
                                 <span className="text-xs sm:text-sm">{formatTime(timer)}</span>
                             </div>
                         </div>
 
                         <div className="w-full h-1 bg-slate-100 dark:bg-slate-800">
-                            <motion.div className="h-full bg-indigo-500" animate={{ width: `${((currentQuestionIndex + 1) / questions.length) * 100}%` }} />
+                            <motion.div className="h-full bg-orange-500" animate={{ width: `${((currentQuestionIndex + 1) / questions.length) * 100}%` }} />
                         </div>
 
                         {/* Content */}
@@ -346,7 +390,7 @@ export default function TopicQuizzesFlow() {
                                             onClick={() => handleAnswerSelect(idx)}
                                             disabled={showExplanation}
                                             className={`w-full p-4 rounded-xl border-2 text-left transition-all flex items-center gap-4
-                                                ${isSelected && !showExplanation ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/20 text-indigo-900 dark:text-indigo-100 shadow-sm' : ''}
+                                                ${isSelected && !showExplanation ? 'border-orange-500 bg-orange-50/50 dark:bg-orange-900/20 text-orange-900 dark:text-orange-100 shadow-sm' : ''}
                                                 ${!isSelected && !showExplanation ? 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-gray-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''}
                                                 ${isCorrect ? 'border-green-500 bg-green-50/50 dark:bg-green-900/20 text-green-900 dark:text-green-100' : ''}
                                                 ${isWrong ? 'border-red-500 bg-red-50/50 dark:bg-red-900/20 text-red-900 dark:text-red-100' : ''}
@@ -354,7 +398,7 @@ export default function TopicQuizzesFlow() {
                                             `}
                                         >
                                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 transition-colors
-                                                ${isSelected && !showExplanation ? 'bg-indigo-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'}
+                                                ${isSelected && !showExplanation ? 'bg-orange-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'}
                                                 ${isCorrect ? 'bg-green-500 text-white' : ''}
                                                 ${isWrong ? 'bg-red-500 text-white' : ''}
                                             `}>
@@ -370,12 +414,12 @@ export default function TopicQuizzesFlow() {
                                 <motion.div
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
-                                    className="mt-8 p-5 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-xl"
+                                    className="mt-8 p-5 bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-800 rounded-xl"
                                 >
-                                    <h4 className="font-bold text-indigo-900 dark:text-indigo-300 mb-2 flex items-center gap-2">
+                                    <h4 className="font-bold text-orange-900 dark:text-orange-300 mb-2 flex items-center gap-2">
                                         <BookOpen className="w-4 h-4" /> Explanation
                                     </h4>
-                                    <p className="text-sm text-indigo-800/80 dark:text-indigo-200/80 leading-relaxed break-words">
+                                    <p className="text-sm text-orange-800/80 dark:text-orange-200/80 leading-relaxed break-words">
                                         {questions[currentQuestionIndex].explanation}
                                     </p>
                                 </motion.div>
@@ -394,7 +438,7 @@ export default function TopicQuizzesFlow() {
 
                             {currentQuestionIndex === questions.length - 1 ? (
                                 <button
-                                    onClick={() => setStep('result')}
+                                    onClick={() => goToStep('result')}
                                     disabled={!showExplanation}
                                     className="px-6 py-2 rounded-xl font-bold bg-green-500 text-white hover:bg-green-600 shadow-md transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
@@ -404,7 +448,7 @@ export default function TopicQuizzesFlow() {
                                 <button
                                     onClick={() => goToQuestion(currentQuestionIndex + 1)}
                                     disabled={!showExplanation}
-                                    className="px-6 py-2 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 shadow-md transition-colors flex items-center gap-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                                    className="px-6 py-2 rounded-xl font-bold bg-orange-600 text-white hover:bg-orange-700 shadow-md transition-colors flex items-center gap-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                     Next <ChevronRight className="w-4 h-4" />
                                 </button>
@@ -428,26 +472,35 @@ export default function TopicQuizzesFlow() {
                         <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 sm:mb-10">You've finished the {selectedChapter?.name} practice quiz.</p>
 
                         <div className="grid grid-cols-1 xs:grid-cols-3 gap-3 sm:gap-4 mb-10">
-                            <div className="p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-                                <div className="text-2xl sm:text-3xl font-black text-indigo-600 dark:text-indigo-400 mb-1">{calculateScore().correct}</div>
-                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Correct</div>
-                            </div>
-                            <div className="p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-                                <div className="text-2xl sm:text-3xl font-black text-red-500 dark:text-red-400 mb-1">{calculateScore().incorrect}</div>
-                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Incorrect</div>
-                            </div>
-                            <div className="p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-                                <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white mb-1">{calculateScore().total}</div>
-                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Score</div>
-                            </div>
+                            <PremiumMetricCard
+                                label="Correct"
+                                value={String(calculateScore().correct)}
+                                icon={<Award className="h-5 w-5" />}
+                                accent="#059669"
+                                detail="Accurate responses"
+                            />
+                            <PremiumMetricCard
+                                label="Incorrect"
+                                value={String(calculateScore().incorrect)}
+                                icon={<FileText className="h-5 w-5" />}
+                                accent="#e11d48"
+                                detail="Review these concepts"
+                            />
+                            <PremiumMetricCard
+                                label="Net score"
+                                value={String(calculateScore().total)}
+                                icon={<BrainCircuit className="h-5 w-5" />}
+                                accent={selectedSubject?.color || '#4f46e5'}
+                                detail="+4 / −1 marking"
+                            />
                         </div>
 
                         <button
                             onClick={() => {
-                                setStep('chapter');
-                                resetQuizState();
+                                resetQuiz();
+                                goToStep('chapter', { chapter: null });
                             }}
-                            className="px-8 py-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-lg shadow-xl shadow-indigo-500/20 transition-all active:scale-95"
+                            className="px-8 py-4 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-lg shadow-xl shadow-orange-500/20 transition-all active:scale-95"
                         >
                             Take Another Quiz
                         </button>
@@ -456,11 +509,4 @@ export default function TopicQuizzesFlow() {
             </AnimatePresence>
         </div>
     );
-
-    function resetQuizState() {
-        setCurrentQuestionIndex(0);
-        setUserAnswers([]);
-        setShowExplanation(false);
-        setTimer(0);
-    }
 }

@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import {
     Activity,
@@ -15,6 +14,7 @@ import {
     computeCompetitiveInsights,
     useCompetitiveStore,
 } from '../../stores/competitiveStore';
+import { PremiumMetricCard } from './CompetitiveCards';
 
 export default function PerformanceAnalytics() {
     const attempts = useCompetitiveStore((s) => s.attempts);
@@ -22,9 +22,9 @@ export default function PerformanceAnalytics() {
 
     return (
         <div className="comp-analytics space-y-8">
-            <header className="relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-xl shadow-slate-200/40 sm:p-8 dark:border-slate-700/50 dark:bg-slate-900/80 dark:shadow-black/20">
+            <header className="comp-surface-card relative overflow-hidden p-6 sm:p-8">
                 <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-amber-400/15 blur-3xl" />
-                <div className="pointer-events-none absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-indigo-500/10 blur-3xl" />
+                <div className="pointer-events-none absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-orange-500/10 blur-3xl" />
                 <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                         <p className="mb-2 text-[10px] font-black uppercase tracking-[0.22em] text-amber-600 dark:text-amber-400">
@@ -55,36 +55,40 @@ export default function PerformanceAnalytics() {
             </header>
 
             <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-                <StatCard
+                <PremiumMetricCard
                     icon={<Trophy className="h-5 w-5" />}
                     label="Attempts"
                     value={String(insights.attemptCount)}
                     accent="#D97706"
+                    detail="Completed assessments"
                 />
-                <StatCard
+                <PremiumMetricCard
                     icon={<Target className="h-5 w-5" />}
                     label="Accuracy"
                     value={`${insights.overallAccuracy}%`}
                     accent="#059669"
+                    detail="Across all attempts"
                 />
-                <StatCard
+                <PremiumMetricCard
                     icon={<Zap className="h-5 w-5" />}
                     label="Avg sec / Q"
                     value={insights.avgSpeed ? String(insights.avgSpeed) : '—'}
                     accent="#4F46E5"
+                    detail="Solve-time efficiency"
                 />
-                <StatCard
+                <PremiumMetricCard
                     icon={<Activity className="h-5 w-5" />}
                     label="Questions"
                     value={`${insights.totalCorrect}/${insights.totalQuestions || 0}`}
                     accent="#DB2777"
+                    detail="Correct / attempted"
                 />
             </div>
 
             {insights.trend.length > 0 && (
-                <section className="rounded-3xl border border-slate-200/70 bg-white/90 p-5 sm:p-6 dark:border-slate-700/50 dark:bg-slate-900/80">
+                <section className="comp-surface-card p-5 sm:p-6">
                     <div className="mb-5 flex items-center gap-2">
-                        <TrendingUp className="h-5 w-5 text-indigo-500" />
+                        <TrendingUp className="h-5 w-5 text-orange-500" />
                         <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700 dark:text-slate-200">
                             Accuracy trend
                         </h3>
@@ -96,7 +100,7 @@ export default function PerformanceAnalytics() {
                                     initial={{ height: 0 }}
                                     animate={{ height: `${Math.max(8, point.accuracy)}%` }}
                                     transition={{ delay: i * 0.05, type: 'spring', damping: 18 }}
-                                    className="w-full max-w-[48px] rounded-t-xl bg-gradient-to-t from-indigo-600 to-violet-400"
+                                    className="w-full max-w-[48px] rounded-t-xl bg-gradient-to-t from-orange-600 to-violet-400"
                                     title={`${point.accuracy}%`}
                                 />
                                 <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
@@ -131,20 +135,21 @@ export default function PerformanceAnalytics() {
                 />
             </div>
 
-            <section className="rounded-3xl border border-indigo-200/60 bg-gradient-to-br from-indigo-50/90 to-violet-50/70 p-5 sm:p-6 dark:border-indigo-900/40 dark:from-indigo-950/40 dark:to-violet-950/30">
-                <div className="mb-4 flex items-center gap-2">
-                    <Lightbulb className="h-5 w-5 text-indigo-600 dark:text-indigo-300" />
-                    <h3 className="text-sm font-black uppercase tracking-[0.14em] text-indigo-900 dark:text-indigo-100">
+            <section className="comp-surface-card relative overflow-hidden p-5 sm:p-6">
+                <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-orange-500/10 blur-3xl" />
+                <div className="relative z-10 mb-4 flex items-center gap-2">
+                    <Lightbulb className="h-5 w-5 text-orange-600 dark:text-orange-300" />
+                    <h3 className="text-sm font-black uppercase tracking-[0.14em] text-orange-900 dark:text-orange-100">
                         AI study recommendations
                     </h3>
                 </div>
-                <ul className="space-y-3">
+                <ul className="relative z-10 space-y-3">
                     {insights.recommendations.map((tip) => (
                         <li
                             key={tip}
                             className="flex gap-3 rounded-2xl border border-white/70 bg-white/70 px-4 py-3 text-sm font-medium text-slate-700 dark:border-white/5 dark:bg-slate-900/50 dark:text-slate-200"
                         >
-                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />
+                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500" />
                             {tip}
                         </li>
                     ))}
@@ -152,7 +157,7 @@ export default function PerformanceAnalytics() {
             </section>
 
             {attempts.length > 0 && (
-                <section className="rounded-3xl border border-slate-200/70 bg-white/90 p-5 sm:p-6 dark:border-slate-700/50 dark:bg-slate-900/80">
+                <section className="comp-surface-card p-5 sm:p-6">
                     <h3 className="mb-4 text-sm font-black uppercase tracking-[0.14em] text-slate-700 dark:text-slate-200">
                         Recent attempts
                     </h3>
@@ -187,35 +192,6 @@ export default function PerformanceAnalytics() {
     );
 }
 
-function StatCard({
-    icon,
-    label,
-    value,
-    accent,
-}: {
-    icon: ReactNode;
-    label: string;
-    value: string;
-    accent: string;
-}) {
-    return (
-        <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-4 shadow-sm dark:border-slate-700/50 dark:bg-slate-900/80">
-            <div
-                className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl"
-                style={{ backgroundColor: `${accent}18`, color: accent }}
-            >
-                {icon}
-            </div>
-            <div className="text-2xl font-black tabular-nums tracking-tight text-slate-900 dark:text-white">
-                {value}
-            </div>
-            <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
-                {label}
-            </div>
-        </div>
-    );
-}
-
 function InsightList({
     title,
     icon,
@@ -228,7 +204,7 @@ function InsightList({
     items: { name: string; meta: string; tone: 'strong' | 'weak' }[];
 }) {
     return (
-        <section className="rounded-3xl border border-slate-200/70 bg-white/90 p-5 dark:border-slate-700/50 dark:bg-slate-900/80">
+        <section className="comp-surface-card p-5">
             <div className="mb-4 flex items-center gap-2">
                 {icon}
                 <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700 dark:text-slate-200">
