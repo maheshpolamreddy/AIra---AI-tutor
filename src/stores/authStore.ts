@@ -122,7 +122,13 @@ export const useAuthStore = create<AuthStore>()(
                 if (!fbUser) {
                     // Keep explicit local demo sessions; clear everything else.
                     if (get().isDemo) {
-                        set({ authReady: true });
+                        // Demo sessions persist user/role/isDemo but not isAuthenticated;
+                        // restore the gate so a refresh stays signed in as the demo persona.
+                        set({
+                            authReady: true,
+                            isAuthenticated: Boolean(get().user),
+                            isGuest: false,
+                        });
                         return;
                     }
                     set({

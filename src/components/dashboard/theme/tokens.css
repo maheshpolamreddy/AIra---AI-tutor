@@ -1,0 +1,151 @@
+/**
+ * Curriculum Mission Control — design tokens
+ * Import from src/index.css. All dashboard components should prefer these vars.
+ */
+
+:root {
+  /* Brand accent (sky → indigo, matches orbit / logo) */
+  --dash-brand: #4f46e5;
+  --dash-brand-2: #0ea5e9;
+  --dash-brand-3: #0d9488;
+  --dash-brand-soft: rgba(79, 70, 229, 0.12);
+  --dash-brand-glow: rgba(14, 165, 233, 0.28);
+
+  /* Surfaces */
+  --dash-bg: #f4f6fa;
+  --dash-surface-0: #ffffff;
+  --dash-surface-1: #f8fafc;
+  --dash-surface-2: #f1f5f9;
+  --dash-surface-ink: #0f172a;
+  --dash-border: rgba(15, 23, 42, 0.08);
+  --dash-border-strong: rgba(15, 23, 42, 0.14);
+
+  /* Text */
+  --dash-text: #0f172a;
+  --dash-text-2: #475569;
+  --dash-text-3: #94a3b8;
+  --dash-text-inv: #ffffff;
+
+  /* Elevation */
+  --dash-shadow-0: none;
+  --dash-shadow-1: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --dash-shadow-2: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --dash-shadow-3: 0 16px 40px rgba(15, 23, 42, 0.12);
+
+  /* Spacing (8px base) */
+  --dash-space-1: 8px;
+  --dash-space-2: 16px;
+  --dash-space-3: 24px;
+  --dash-space-4: 32px;
+  --dash-space-5: 40px;
+  --dash-card-pad: 20px;
+  --dash-card-gap: 16px;
+  --dash-section-gap: 32px;
+  --dash-radius: 16px;
+  --dash-radius-lg: 20px;
+
+  /* Motion */
+  --dash-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dash-hover-ms: 150ms;
+  --dash-enter-ms: 600ms;
+
+  /* Typography */
+  --dash-font: Inter, system-ui, sans-serif;
+  --dash-font-display: "Inter Tight", Inter, system-ui, sans-serif;
+  --dash-hero-size: clamp(1.5rem, 2.4vw, 2rem);
+  --dash-section-size: clamp(1.125rem, 1.6vw, 1.25rem);
+  --dash-card-title: 0.9375rem;
+  --dash-eyebrow: 0.625rem;
+
+  /* Subject accents (light) */
+  --dash-subj-math: #2c8cff;
+  --dash-subj-science: #1dd186;
+  --dash-subj-english: #ff5e7e;
+  --dash-subj-hindi: #ff9e2c;
+  --dash-subj-social: #8a4fff;
+  --dash-subj-cs: #00c2d1;
+  --dash-subj-physics: #6366f1;
+  --dash-subj-chem: #f59e0b;
+  --dash-subj-bio: #10b981;
+}
+
+html.dark,
+[data-theme="dark"] {
+  --dash-bg: #020617;
+  --dash-surface-0: #0f172a;
+  --dash-surface-1: #1e293b;
+  --dash-surface-2: #334155;
+  --dash-surface-ink: #e2e8f0;
+  --dash-border: rgba(148, 163, 184, 0.14);
+  --dash-border-strong: rgba(148, 163, 184, 0.28);
+  --dash-text: #f8fafc;
+  --dash-text-2: #94a3b8;
+  --dash-text-3: #64748b;
+  --dash-text-inv: #ffffff;
+  --dash-brand-soft: rgba(129, 140, 248, 0.18);
+  --dash-brand-glow: rgba(56, 189, 248, 0.22);
+  --dash-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --dash-shadow-2: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --dash-shadow-3: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dash-hover-ms: 0ms;
+    --dash-enter-ms: 0ms;
+  }
+}
+
+/* Utility classes for Mission Control */
+.dash-shell {
+  font-family: var(--dash-font);
+  color: var(--dash-text);
+  background: var(--dash-bg);
+  min-height: 100dvh;
+}
+
+.dash-card {
+  background: var(--dash-surface-0);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius-lg);
+  box-shadow: var(--dash-shadow-1);
+  padding: var(--dash-card-pad);
+  transition:
+    transform var(--dash-hover-ms) var(--dash-ease),
+    box-shadow var(--dash-hover-ms) var(--dash-ease),
+    border-color var(--dash-hover-ms) var(--dash-ease);
+}
+
+.dash-card--featured {
+  box-shadow: var(--dash-shadow-3);
+}
+
+.dash-card--interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--dash-shadow-2);
+  border-color: var(--dash-border-strong);
+}
+
+.dash-eyebrow {
+  font-size: var(--dash-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dash-text-3);
+}
+
+.dash-section-title {
+  font-family: var(--dash-font-display);
+  font-size: var(--dash-section-size);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--dash-text);
+}
+
+@media (min-width: 640px) {
+  :root {
+    --dash-card-pad: 24px;
+    --dash-card-gap: 20px;
+    --dash-section-gap: 40px;
+  }
+}
