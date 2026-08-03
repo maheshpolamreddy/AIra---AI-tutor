@@ -1,5 +1,5 @@
-import { Search } from 'lucide-react';
-import { subjectIcon } from '../theme/subjectColors';
+import { Search, Sparkles, BookOpen, X } from 'lucide-react';
+import { subjectHex, subjectIcon } from '../theme/subjectColors';
 
 const CATEGORIES = [
   'For You',
@@ -21,35 +21,35 @@ type FilterPillsProps = {
 
 export function FilterPills({ active, onChange }: FilterPillsProps) {
   return (
-    <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-3 scrollbar-hide -mx-1 px-1">
-      {CATEGORIES.map((cat) => {
-        const Icon = subjectIcon(cat);
-        const isActive = active === cat;
-        return (
-          <button
-            key={cat}
-            type="button"
-            onClick={() => onChange(cat)}
-            className="shrink-0 inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-xs font-semibold border transition-all"
-            style={{
-              background: isActive ? 'var(--dash-surface-ink)' : 'var(--dash-surface-0)',
-              color: isActive ? 'var(--dash-text-inv)' : 'var(--dash-text-2)',
-              borderColor: isActive ? 'var(--dash-surface-ink)' : 'var(--dash-border)',
-              boxShadow: isActive ? 'var(--dash-shadow-1)' : undefined,
-              transitionDuration: 'var(--dash-hover-ms)',
-            }}
-            onMouseEnter={(e) => {
-              if (!isActive) e.currentTarget.style.background = 'var(--dash-surface-1)';
-            }}
-            onMouseLeave={(e) => {
-              if (!isActive) e.currentTarget.style.background = 'var(--dash-surface-0)';
-            }}
-          >
-            <Icon className="w-3.5 h-3.5 opacity-80" />
-            {cat}
-          </button>
-        );
-      })}
+    <div className="topic-filter-rail">
+      <div className="topic-filter-rail__track" role="tablist" aria-label="Topic subjects">
+        {CATEGORIES.map((cat) => {
+          const Icon = cat === 'For You' ? Sparkles : subjectIcon(cat);
+          const isActive = active === cat;
+          const accent = cat === 'For You' ? '#4f46e5' : subjectHex(cat);
+          return (
+            <button
+              key={cat}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => onChange(cat)}
+              className="topic-filter-chip"
+              style={
+                isActive
+                  ? {
+                      ['--chip-accent' as string]: accent,
+                      background: `linear-gradient(135deg, ${accent} 0%, color-mix(in srgb, ${accent} 72%, #0ea5e9) 100%)`,
+                    }
+                  : undefined
+              }
+            >
+              <Icon className="w-3.5 h-3.5 opacity-90" />
+              <span>{cat}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -61,21 +61,22 @@ type SearchBarProps = {
 
 export function SearchBar({ value, onChange }: SearchBarProps) {
   return (
-    <div className="relative w-full sm:w-72">
+    <div className="relative w-full">
       <Search
-        className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4"
+        className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
         style={{ color: 'var(--dash-text-3)' }}
       />
       <input
         type="search"
-        placeholder="Search topics…"
+        placeholder="Search lessons by name or subject…"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full h-10 pl-9 pr-3 rounded-xl border text-sm outline-none transition-shadow"
+        className="w-full h-11 pl-10 pr-10 rounded-xl border text-sm outline-none transition-shadow"
         style={{
           background: 'var(--dash-surface-0)',
           borderColor: 'var(--dash-border)',
           color: 'var(--dash-text)',
+          boxShadow: 'inset 0 1px 2px rgba(15,23,42,0.03)',
         }}
         onFocus={(e) => {
           e.currentTarget.style.borderColor = 'var(--dash-brand)';
@@ -83,9 +84,50 @@ export function SearchBar({ value, onChange }: SearchBarProps) {
         }}
         onBlur={(e) => {
           e.currentTarget.style.borderColor = 'var(--dash-border)';
-          e.currentTarget.style.boxShadow = 'none';
+          e.currentTarget.style.boxShadow = 'inset 0 1px 2px rgba(15,23,42,0.03)';
         }}
       />
+      {value ? (
+        <button
+          type="button"
+          aria-label="Clear search"
+          onClick={() => onChange('')}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg inline-flex items-center justify-center"
+          style={{ color: 'var(--dash-text-3)', background: 'var(--dash-surface-2)' }}
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function TopicEmptyState({ query }: { query?: string }) {
+  return (
+    <div
+      className="rounded-2xl border border-dashed py-14 px-6 text-center"
+      style={{
+        borderColor: 'var(--dash-border-strong)',
+        background: 'linear-gradient(165deg, rgba(14,165,233,0.04), rgba(79,70,229,0.05))',
+      }}
+    >
+      <span
+        className="mx-auto mb-3 w-12 h-12 rounded-2xl flex items-center justify-center"
+        style={{ background: 'var(--dash-brand-soft)', color: 'var(--dash-brand)' }}
+      >
+        <BookOpen className="w-5 h-5" />
+      </span>
+      <p
+        className="text-[15px] font-bold"
+        style={{ fontFamily: 'var(--dash-font-display)', color: 'var(--dash-text)' }}
+      >
+        {query ? 'No lessons match your search' : 'No lessons in this subject yet'}
+      </p>
+      <p className="mt-1.5 text-sm max-w-sm mx-auto" style={{ color: 'var(--dash-text-2)' }}>
+        {query
+          ? 'Try another keyword, or clear search to browse all recommended topics.'
+          : 'Pick another subject above to explore available lessons.'}
+      </p>
     </div>
   );
 }

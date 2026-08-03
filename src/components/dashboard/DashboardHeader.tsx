@@ -122,7 +122,7 @@ export default function DashboardHeader({
             />
           </span>
           <span className="text-[11px] font-semibold" style={{ color: 'var(--dash-text-2)' }}>
-            {liveNow ? 'Live session pulse' : 'Mission control online'}
+            {liveNow ? 'Live session active' : 'AIra learning online'}
           </span>
         </div>
 

@@ -280,6 +280,18 @@
 /* LAYER: UTILITIES */
 @layer utilities {
 
+  /* Hide scrollbars while keeping scroll / swipe */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
   /* Collapsed teaching-panel rail labels (Chat / Teaching / Studio) */
   .writing-mode-vertical {
     writing-mode: vertical-lr;

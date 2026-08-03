@@ -1,21 +1,9 @@
-import { useEffect, useState, type ReactNode, Component, Suspense, lazy } from 'react';
+import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { Sparkles } from 'lucide-react';
 import OrbitRings from './OrbitRings';
 import StatMiniCard from './StatMiniCard';
-import { StaticStudentFallback } from './StudentAvatar3DFallback';
-
-const StudentAvatar3D = lazy(() => import('./StudentAvatar3D'));
-
-class AvatarBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { err: boolean }> {
-  state = { err: false };
-  static getDerivedStateFromError() {
-    return { err: true };
-  }
-  render() {
-    return this.state.err ? this.props.fallback : this.props.children;
-  }
-}
+import StudentAvatarVideo from './StudentAvatarVideo';
 
 export type HeroStat = {
   label: string;
@@ -23,6 +11,7 @@ export type HeroStat = {
   tone: 'sky' | 'amber' | 'rose' | 'teal';
   sparkline?: number[];
   onClick?: () => void;
+  emptyHint?: string;
 };
 
 type HeroCardProps = {
@@ -40,14 +29,6 @@ export default function HeroCard({
   orbitLabel,
   stats,
 }: HeroCardProps) {
-  const [scrollY, setScrollY] = useState(0);
-
-  useEffect(() => {
-    const onScroll = () => setScrollY(window.scrollY || 0);
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
-
   return (
     <motion.section
       className="dash-card dash-card--featured relative overflow-hidden h-full"
@@ -63,11 +44,9 @@ export default function HeroCard({
       <div className="flex flex-col sm:flex-row gap-5 sm:gap-6 items-center sm:items-stretch relative">
         <div className="w-full sm:w-[200px] md:w-[240px] lg:w-[260px] shrink-0 relative">
           <OrbitRings readiness={readiness} className="w-full">
-            <AvatarBoundary fallback={<StaticStudentFallback readiness={readiness} />}>
-              <Suspense fallback={<StaticStudentFallback readiness={readiness} />}>
-                <StudentAvatar3D readiness={readiness} scrollY={scrollY} />
-              </Suspense>
-            </AvatarBoundary>
+            <div className="flex items-center justify-center w-full">
+              <StudentAvatarVideo readiness={readiness} />
+            </div>
           </OrbitRings>
           <div
             className="absolute left-1/2 -translate-x-1/2 z-20 px-2.5 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap shadow-lg"
@@ -87,7 +66,7 @@ export default function HeroCard({
             style={{ color: 'var(--dash-brand-2)', letterSpacing: '0.14em' }}
           >
             <Sparkles className="w-3.5 h-3.5" style={{ color: 'var(--dash-brand-2)' }} />
-            Curriculum command
+            Curriculum overview
           </p>
           <h1
             className="tracking-tight leading-[1.15]"

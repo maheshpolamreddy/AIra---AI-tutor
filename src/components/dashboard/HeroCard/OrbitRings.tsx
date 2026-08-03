@@ -97,7 +97,7 @@ export default function OrbitRings({ readiness, children, className = '' }: Orbi
         </defs>
       </svg>
 
-      <div className="relative z-10 p-[12%]">{children}</div>
+      <div className="relative z-10 p-[8%]">{children}</div>
     </div>
   );
 }

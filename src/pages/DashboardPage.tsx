@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useShallow } from 'zustand/react/shallow';
-import { useUserStore } from '../stores/userStore';
 import { Sparkles, GraduationCap, Rocket } from 'lucide-react';
 import PageTransition from '../components/common/PageTransition';
 import { displayNameForUser } from '../components/common/UserAvatar';
@@ -33,19 +32,16 @@ export default function DashboardPage() {
     useShallow((s) => ({ user: s.user, logout: s.logout, role: s.role }))
   );
   const routes = getRoutesForRole(role);
-  const { profile } = useUserStore(useShallow((s) => ({ profile: s.profile })));
   const { currentSession } = useTeachingStore(
     useShallow((s) => ({ currentSession: s.currentSession }))
   );
   const updateMetrics = useAnalyticsStore((s) => s.updateMetrics);
-  const insights = useDashboardInsights();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('For You');
   const [range, setRange] = useState<'7d' | '30d' | 'all'>('7d');
+  const insights = useDashboardInsights(range);
 
   const learnerName = firstName(displayNameForUser(user));
-  const profession = profile?.profession?.name;
-  const track = profile?.subProfession || undefined;
 
   const filteredTopics = useMemo(() => {
     let base: TopicCardModel[] = [];
@@ -96,7 +92,7 @@ export default function DashboardPage() {
       // Long-press alternative: double-tap refresh opens demo roles in DEV
     }
     updateMetrics();
-    toast.success('Mission data refreshed');
+    toast.success('Dashboard data refreshed');
   };
 
   const handleStartTopic = (topicId: string) => {
@@ -112,23 +108,9 @@ export default function DashboardPage() {
         )
       : routes.dashboard;
 
-  const heroDescription = profession ? (
-    <>
-      Tracking your path in{' '}
-      <span className="font-semibold" style={{ color: 'var(--dash-text)' }}>
-        {profession}
-      </span>
-      {track && track !== profession ? (
-        <>
-          {' '}
-          · <span style={{ color: 'var(--dash-text-2)' }}>{track}</span>
-        </>
-      ) : null}
-      . Your orbit updates as you study.
-    </>
-  ) : (
-    'Your learning orbit is live — launch a mission and watch progress sync in real time.'
-  );
+  const heroDescription = !insights.hasActivity
+    ? 'Start a lesson and your study time, streak, and next topic will show up here as you learn.'
+    : 'Your study time, quiz accuracy, streak, and next recommended lesson update here as you practice.';
 
   const strengthSubtitle = !insights.hasActivity
     ? 'Finish a quiz to unlock your strength map.'
@@ -136,7 +118,13 @@ export default function DashboardPage() {
       ? `Top ${insights.peerPercentile}% peer band`
       : insights.strength
         ? `Most studied · ${Math.round(insights.strength.minutes)} min`
-        : 'Keep flying to reveal your edge.';
+        : 'Keep practicing to reveal your strongest subject.';
+
+  const strengthProgress = !insights.hasActivity
+    ? 0
+    : insights.strength?.avgScore ||
+      Math.min(90, Math.round((insights.strength?.minutes || 0) / 5)) ||
+      0;
 
   return (
     <div className="dash-shell relative">
@@ -180,25 +168,28 @@ export default function DashboardPage() {
         />
 
         <main className="flex-1 w-full" id="main-content" tabIndex={-1}>
-          <PageTransition className="max-w-[1200px] mx-auto px-4 sm:px-6 py-4 sm:py-6 md:py-8 pb-20">
+          <PageTransition className="max-w-[1200px] mx-auto px-4 sm:px-6 py-4 sm:py-6 md:py-8 pb-24 sm:pb-20">
             <div
               className="grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4"
               style={{ marginBottom: 'var(--dash-card-gap)' }}
             >
-              <div className="lg:col-span-8 min-w-0">
+              <div className="lg:col-span-8 min-w-0 order-1">
                 <HeroCard
                   learnerName={learnerName}
                   readiness={insights.readiness}
                   description={heroDescription}
-                  orbitLabel={`${insights.metrics.totalHours}h logged · orbit ${
-                    insights.hasActivity ? 'active' : 'standby'
-                  }`}
+                  orbitLabel={
+                    insights.hasActivity
+                      ? `${insights.metrics.totalHours}h studied · learning active`
+                      : 'Ready when you are · start your first lesson'
+                  }
                   stats={[
                     {
-                      label: 'Flight time',
+                      label: 'Study time',
                       value: `${insights.metrics.totalHours}h`,
                       tone: 'sky',
                       sparkline: weeklySpark,
+                      emptyHint: !insights.hasActivity ? 'Logs after first session' : undefined,
                     },
                     {
                       label: 'Accuracy',
@@ -206,44 +197,51 @@ export default function DashboardPage() {
                       tone: 'amber',
                       sparkline: insights.weeklyQuizBars,
                       onClick: () => navigate(routes.profile),
+                      emptyHint: !insights.hasActivity ? 'Unlocks with quizzes' : undefined,
                     },
                     {
                       label: 'Streak',
                       value: `${insights.metrics.streakDays}d`,
                       tone: 'rose',
                       sparkline: weeklySpark.map((h) => (h > 0 ? 1 : 0)),
+                      emptyHint: !insights.hasActivity ? 'Study daily to build it' : undefined,
                     },
                     {
-                      label: 'Cleared',
+                      label: 'Completed',
                       value: `${insights.metrics.topicsCompleted}`,
                       tone: 'teal',
+                      emptyHint: !insights.hasActivity ? 'Finish a topic to count' : undefined,
                     },
                   ]}
                 />
               </div>
 
-              <div className="lg:col-span-4 flex flex-col gap-3 sm:gap-4 min-w-0">
+              <div className="lg:col-span-4 flex flex-col gap-3 sm:gap-4 min-w-0 order-2">
                 <SuperStrengthCard
                   subjectName={insights.strength?.name || 'Getting started'}
                   subtitle={strengthSubtitle}
-                  progressPct={
-                    insights.strength?.avgScore ||
-                    Math.min(90, Math.round((insights.strength?.minutes || 0) / 5)) ||
-                    12
+                  progressPct={strengthProgress}
+                  contextLine={
+                    insights.hasActivity
+                      ? 'Based on your recent practice sessions'
+                      : 'Updates as you practice with AIra'
                   }
-                  contextLine="Based on your last practice sessions"
+                  empty={!insights.hasActivity || !insights.strength}
                 />
                 <NextMissionCard
-                  title={insights.nextTopic?.name || insights.focus?.name || 'Pick a mission'}
+                  title={insights.nextTopic?.name || insights.focus?.name || 'Pick a lesson'}
                   meta={
                     insights.nextTopic
                       ? `${insights.nextTopic.duration} · ${insights.nextTopic.subject}`
-                      : 'Open the vault to start your first deep dive'
+                      : 'Browse curriculum to start your next lesson'
                   }
+                  duration={insights.nextTopic?.duration}
+                  subjectName={insights.nextTopic?.subject}
                   subjectId={insights.nextTopic?.subjectId || insights.focus?.id || 'mathematics'}
                   difficulty={insights.nextTopic?.difficulty}
                   inProgress={insights.nextTopic?.inProgress}
                   mastery={insights.nextTopic?.mastery}
+                  empty={!insights.nextTopic}
                   onLaunch={() => {
                     if (insights.nextTopic) handleStartTopic(insights.nextTopic.id);
                     else if ('curriculum' in routes)
@@ -257,21 +255,27 @@ export default function DashboardPage() {
               className="grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4"
               style={{ marginBottom: 'var(--dash-section-gap)' }}
             >
-              <div className="lg:col-span-7 xl:col-span-8 min-w-0 flex flex-col gap-3 sm:gap-4">
+              <div className="lg:col-span-7 xl:col-span-8 min-w-0 flex flex-col gap-3 sm:gap-4 order-1">
                 <LearningJourneyChart
                   points={insights.journeyPoints}
                   growthPct={insights.growthPct}
                   hasActivity={insights.hasActivity}
                   range={range}
+                  rangeLabel={insights.rangeLabel}
                   onRangeChange={setRange}
                 />
-                {recentDeduped.length > 0 && (
-                  <div className="dash-card">
-                    <RecentMissionsStrip items={recentDeduped} onOpen={handleStartTopic} />
-                  </div>
-                )}
+                <div
+                  className="dash-card shrink-0"
+                  style={{ background: 'linear-gradient(165deg, #ffffff 0%, #f8fafc 55%, #eef2ff 100%)' }}
+                >
+                  <RecentMissionsStrip
+                    items={recentDeduped}
+                    onOpen={handleStartTopic}
+                    empty={recentDeduped.length === 0}
+                  />
+                </div>
               </div>
-              <div className="lg:col-span-5 xl:col-span-4 min-w-0">
+              <div className="lg:col-span-5 xl:col-span-4 min-w-0 order-2">
                 <ExamMissionCard
                   readiness={insights.readiness}
                   weeklyScores={insights.weeklyQuizBars}
@@ -280,7 +284,7 @@ export default function DashboardPage() {
                   efficiencyMinPerQ={insights.efficiencyMinPerQ}
                   streakDays={insights.metrics.streakDays}
                   topicsCompleted={insights.metrics.topicsCompleted}
-                  targetLabel={profession || 'Curriculum mastery'}
+                  targetLabel="Exam readiness"
                   hasActivity={insights.hasActivity}
                 />
               </div>
@@ -299,17 +303,27 @@ export default function DashboardPage() {
               {'modeSelection' in routes && (
                 <ActionCard
                   onClick={() => navigate((routes as { modeSelection: string }).modeSelection)}
-                  icon={<Sparkles className="w-4 h-4" style={{ color: 'var(--dash-brand)' }} />}
+                  icon={<Sparkles className="w-4 h-4" />}
                   title="Learning mode"
-                  body="Curriculum or competitive prep"
+                  body={
+                    insights.hasActivity
+                      ? 'Switch between school curriculum and competitive prep'
+                      : 'Choose school curriculum or competitive prep'
+                  }
+                  accent="#4f46e5"
                 />
               )}
               {'curriculum' in routes && (
                 <ActionCard
                   onClick={() => navigate((routes as { curriculum: string }).curriculum)}
-                  icon={<GraduationCap className="w-4 h-4 text-teal-600" />}
-                  title="Study vault"
-                  body={`${insights.completedCount} cleared · ${insights.inProgressCount} in flight`}
+                  icon={<GraduationCap className="w-4 h-4" />}
+                  title="Curriculum"
+                  body={
+                    insights.hasActivity
+                      ? `${insights.completedCount} completed · ${insights.inProgressCount} in progress`
+                      : 'Browse topics — progress syncs as you study'
+                  }
+                  accent="#0d9488"
                 />
               )}
               <ActionCard
@@ -319,13 +333,18 @@ export default function DashboardPage() {
                     : 'curriculum' in routes &&
                       navigate((routes as { curriculum: string }).curriculum)
                 }
-                icon={<Rocket className="w-4 h-4 text-sky-600" />}
-                title="Continue"
-                body={insights.nextTopic ? insights.nextTopic.name : 'Launch your next lesson'}
+                icon={<Rocket className="w-4 h-4" />}
+                title="Continue learning"
+                body={
+                  insights.nextTopic
+                    ? insights.nextTopic.name
+                    : 'Start your first lesson with AIra'
+                }
+                accent="#0284c7"
               />
               <ProfileCard
                 user={user}
-                profession={profession}
+                profession="Student"
                 badgeCount={insights.unlockedAchievements.length}
                 onClick={() => navigate(routes.profile)}
               />

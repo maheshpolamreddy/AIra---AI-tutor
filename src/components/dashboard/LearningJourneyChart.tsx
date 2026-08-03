@@ -11,6 +11,7 @@ type LearningJourneyChartProps = {
   growthPct: number;
   hasActivity: boolean;
   range?: RangeKey;
+  rangeLabel?: string;
   onRangeChange?: (r: RangeKey) => void;
 };
 
@@ -31,6 +32,7 @@ export default function LearningJourneyChart({
   growthPct,
   hasActivity,
   range = '7d',
+  rangeLabel = 'last 7 days',
   onRangeChange,
 }: LearningJourneyChartProps) {
   const reduced = useReducedMotion();
@@ -48,33 +50,38 @@ export default function LearningJourneyChart({
   ];
 
   return (
-    <div className="dash-card h-full flex flex-col">
+    <div className="dash-card flex flex-col" style={{ background: 'var(--dash-grad-chart)' }}>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <div>
           <h2 className="dash-section-title flex items-center gap-2">
-            <TrendingUp className="w-4 h-4" style={{ color: 'var(--dash-brand)' }} />
+            <span
+              className="w-7 h-7 rounded-lg inline-flex items-center justify-center"
+              style={{ background: 'var(--dash-brand-soft)' }}
+            >
+              <TrendingUp className="w-3.5 h-3.5" style={{ color: 'var(--dash-brand)' }} />
+            </span>
             Learning journey
           </h2>
           <p className="text-[11px] mt-0.5" style={{ color: 'var(--dash-text-3)' }}>
-            Real-time study hours · last 7 days
+            Study hours · {rangeLabel}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           {onRangeChange && (
             <div
-              className="inline-flex rounded-lg p-0.5 border"
-              style={{ background: 'var(--dash-surface-1)', borderColor: 'var(--dash-border)' }}
+              className="inline-flex rounded-xl p-0.5 border"
+              style={{ background: 'rgba(255,255,255,0.7)', borderColor: 'var(--dash-border)' }}
             >
               {ranges.map((r) => (
                 <button
                   key={r.key}
                   type="button"
                   onClick={() => onRangeChange(r.key)}
-                  className="px-2.5 h-7 rounded-md text-[11px] font-semibold transition-colors"
+                  className="px-2.5 h-7 rounded-lg text-[11px] font-semibold transition-colors"
                   style={{
-                    background: range === r.key ? 'var(--dash-surface-0)' : 'transparent',
-                    color: range === r.key ? 'var(--dash-text)' : 'var(--dash-text-3)',
-                    boxShadow: range === r.key ? 'var(--dash-shadow-1)' : undefined,
+                    background: range === r.key ? 'var(--dash-grad-brand)' : 'transparent',
+                    color: range === r.key ? '#fff' : 'var(--dash-text-3)',
+                    boxShadow: range === r.key ? '0 4px 12px rgba(79,70,229,0.25)' : undefined,
                   }}
                 >
                   {r.label}
@@ -82,24 +89,26 @@ export default function LearningJourneyChart({
               ))}
             </div>
           )}
-          <span
-            className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full"
-            style={{
-              background: growthPct >= 0 ? 'rgba(16,185,129,0.12)' : 'rgba(244,63,94,0.12)',
-              color: growthPct >= 0 ? '#059669' : '#e11d48',
-            }}
-          >
+          {hasActivity ? (
             <span
-              className="w-1.5 h-1.5 rounded-full"
-              style={{ background: growthPct >= 0 ? '#10b981' : '#f43f5e' }}
-            />
-            {growthPct >= 0 ? '+' : ''}
-            {growthPct}% vs last week
-          </span>
+              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full"
+              style={{
+                background: growthPct >= 0 ? 'rgba(16,185,129,0.12)' : 'rgba(244,63,94,0.12)',
+                color: growthPct >= 0 ? '#059669' : '#e11d48',
+              }}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ background: growthPct >= 0 ? '#10b981' : '#f43f5e' }}
+              />
+              {growthPct >= 0 ? '+' : ''}
+              {growthPct}% vs last week
+            </span>
+          ) : null}
         </div>
       </div>
 
-      <div className="h-40 sm:h-48 w-full relative flex-1">
+      <div className="h-40 sm:h-48 w-full relative flex-1 min-h-[10rem]">
         {hasActivity ? (
           <>
             <svg viewBox="0 0 700 180" preserveAspectRatio="none" className="w-full h-full overflow-visible">
@@ -132,19 +141,18 @@ export default function LearningJourneyChart({
                 transition={{ duration: reduced ? 0 : 1.2, ease: 'easeOut' }}
               />
               {points.map((p, i) => (
-                <g key={i}>
-                  <circle
-                    cx={p.x}
-                    cy={p.y}
-                    r={hoverIdx === i ? 6 : 4}
-                    fill="var(--dash-brand)"
-                    stroke="var(--dash-surface-0)"
-                    strokeWidth="2"
-                    className="cursor-pointer"
-                    onMouseEnter={() => setHoverIdx(i)}
-                    onMouseLeave={() => setHoverIdx(null)}
-                  />
-                </g>
+                <circle
+                  key={i}
+                  cx={p.x}
+                  cy={p.y}
+                  r={hoverIdx === i ? 6 : 4}
+                  fill="var(--dash-brand)"
+                  stroke="var(--dash-surface-0)"
+                  strokeWidth="2"
+                  className="cursor-pointer"
+                  onMouseEnter={() => setHoverIdx(i)}
+                  onMouseLeave={() => setHoverIdx(null)}
+                />
               ))}
               <defs>
                 <linearGradient id="journeyStrokeEnterprise" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -152,7 +160,7 @@ export default function LearningJourneyChart({
                   <stop offset="100%" stopColor="#4f46e5" />
                 </linearGradient>
                 <linearGradient id="journeyFillEnterprise" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor="#6366f1" stopOpacity="0.22" />
+                  <stop offset="0%" stopColor="#6366f1" stopOpacity="0.28" />
                   <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
                 </linearGradient>
               </defs>
@@ -173,13 +181,11 @@ export default function LearningJourneyChart({
             )}
           </>
         ) : (
-          <div
-            className="h-full flex flex-col items-center justify-center rounded-xl border border-dashed text-center px-4"
-            style={{ borderColor: 'var(--dash-border)', background: 'var(--dash-surface-1)' }}
-          >
-            <Activity className="w-6 h-6 mb-2" style={{ color: 'var(--dash-text-3)' }} />
-            <p className="text-sm font-medium" style={{ color: 'var(--dash-text-2)' }}>
-              Chart unlocks after your first lesson
+          <div className="dash-empty-state h-full">
+            <Activity className="w-6 h-6" style={{ color: 'var(--dash-brand-2)' }} />
+            <p className="dash-empty-state__title">No study hours yet</p>
+            <p className="dash-empty-state__body">
+              Finish your first lesson and this chart will fill with your study time for {rangeLabel}.
             </p>
           </div>
         )}

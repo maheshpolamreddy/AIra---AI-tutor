@@ -79,7 +79,39 @@ function minutesThisWeek(sessions: SessionAnalytics[], weekOffset = 0): number {
   return total;
 }
 
-export function useDashboardInsights() {
+export type JourneyRange = '7d' | '30d' | 'all';
+
+function hoursBuckets(sessions: SessionAnalytics[], days: number): number[] {
+  const today = localDay(Date.now());
+  if (today === null) return Array.from({ length: days }, () => 0);
+  const minutes = new Array(days).fill(0) as number[];
+  for (const s of sessions) {
+    const day = localDay(s.date);
+    if (day === null) continue;
+    const offset = today - day;
+    if (offset >= 0 && offset < days) minutes[days - 1 - offset] += s.durationMinutes;
+  }
+  return minutes.map((m) => Math.round((m / 60) * 10) / 10);
+}
+
+function buildJourneyPoints(hours: number[]): { x: number; y: number; hours: number; label: string }[] {
+  const n = Math.max(hours.length, 2);
+  const maxH = Math.max(...hours, 0.1);
+  const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  return hours.map((h, i) => {
+    const dayOffset = i - (hours.length - 1);
+    const d = new Date();
+    d.setDate(d.getDate() + dayOffset);
+    const x = 20 + (i / (n - 1)) * 660;
+    const y = 160 - (h / maxH) * 130;
+    let label = dayLabels[d.getDay()];
+    if (dayOffset === 0) label = 'Today';
+    else if (hours.length > 14) label = `${d.getMonth() + 1}/${d.getDate()}`;
+    return { x, y, hours: h, label };
+  });
+}
+
+export function useDashboardInsights(range: JourneyRange = '7d') {
   const { sessions, metrics, achievements } = useAnalyticsStore(
     useShallow((s) => ({
       sessions: s.sessions,
@@ -203,35 +235,46 @@ export function useDashboardInsights() {
           ? 100
           : 0;
 
-    // Learning journey points from weeklyHours (7 days, oldest → newest)
     const weekly = metrics.weeklyHours.length === 7 ? metrics.weeklyHours : [0, 0, 0, 0, 0, 0, 0];
-    const maxH = Math.max(...weekly, 0.1);
-    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const labeledPoints = weekly.map((h, i) => {
-      const dayOffset = i - 6; // -6 … 0
-      const d = new Date();
-      d.setDate(d.getDate() + dayOffset);
-      const x = 20 + (i / 6) * 660;
-      const y = 160 - (h / maxH) * 130;
-      return {
-        x,
-        y,
-        hours: h,
-        label: dayOffset === 0 ? 'Today' : dayLabels[d.getDay()],
-      };
-    });
+    const rangeDays = range === '7d' ? 7 : range === '30d' ? 30 : Math.max(7, (() => {
+      const today = localDay(Date.now());
+      if (today === null || sessions.length === 0) return 7;
+      let oldest = today;
+      for (const s of sessions) {
+        const d = localDay(s.date);
+        if (d !== null && d < oldest) oldest = d;
+      }
+      return Math.min(90, Math.max(7, today - oldest + 1));
+    })());
+    const rangeHours = range === '7d' ? weekly : hoursBuckets(sessions, rangeDays);
+    // Downsample long ranges to ≤14 points for chart readability
+    const chartHours =
+      rangeHours.length <= 14
+        ? rangeHours
+        : (() => {
+            const buckets = 14;
+            const size = rangeHours.length / buckets;
+            return Array.from({ length: buckets }, (_, i) => {
+              const start = Math.floor(i * size);
+              const end = Math.floor((i + 1) * size);
+              const slice = rangeHours.slice(start, end);
+              const sum = slice.reduce((a, b) => a + b, 0);
+              return Math.round((sum / Math.max(slice.length, 1)) * 10) / 10;
+            });
+          })();
+    const labeledPoints = buildJourneyPoints(chartHours);
 
     const scored = scoredSessions(sessions);
     const readiness = (() => {
+      if (sessions.length === 0) return 0;
       const accuracy = metrics.averageQuizScore;
       const streakBoost = Math.min(metrics.streakDays * 4, 20);
       const volumeBoost = Math.min(metrics.topicsCompleted * 5, 25);
       const hourBoost = Math.min(metrics.totalHours * 2, 20);
-      if (sessions.length === 0) return 8;
       return Math.min(99, Math.round(accuracy * 0.45 + streakBoost + volumeBoost + hourBoost * 0.5 + 10));
     })();
 
-    // Weekly quiz averages for exam bars (last 7 days with scores; pad with 0)
+    // Weekly quiz averages for exam bars (last 7 days — real scores only)
     const today = localDay(Date.now());
     const weeklyScores = new Array(7).fill(0) as number[];
     const weeklyScoreCounts = new Array(7).fill(0) as number[];
@@ -248,7 +291,7 @@ export function useDashboardInsights() {
       }
     }
     const weeklyQuizBars = weeklyScores.map((sum, i) =>
-      weeklyScoreCounts[i] ? Math.round(sum / weeklyScoreCounts[i]) : Math.round((weekly[i] / maxH) * 70)
+      weeklyScoreCounts[i] ? Math.round(sum / weeklyScoreCounts[i]) : 0
     );
 
     const recentSessions = [...sessions]
@@ -311,6 +354,8 @@ export function useDashboardInsights() {
       allTopics,
       efficiencyMinPerQ,
       hasActivity: sessions.length > 0,
+      range,
+      rangeLabel: range === '7d' ? 'last 7 days' : range === '30d' ? 'last 30 days' : 'all time',
     };
-  }, [sessions, metrics, achievements, progressMap, lastAccessedGrade, lastAccessedSubject]);
+  }, [sessions, metrics, achievements, progressMap, lastAccessedGrade, lastAccessedSubject, range]);
 }
