@@ -29,6 +29,7 @@ import {
   defaultWeekendWindowsIst,
   duplicateWeekToNext,
   formatWindowLabel,
+  getIsoWeekKeyFromUtcIso,
   getIsoWeekKeyIst,
   getSessionWindowState,
   listAllForAdmin,
@@ -139,6 +140,15 @@ export default function AdminWeeklyExamsPage() {
 
   const selectedExam = COMPETITIVE_EXAMS.find((e) => e.id === form.examId) || COMPETITIVE_EXAMS[0];
 
+  // Keep week key aligned with the start time (students filter by current week)
+  useEffect(() => {
+    if (!form.startsLocal) return;
+    const derived = getIsoWeekKeyFromUtcIso(localIstInputToUtcIso(form.startsLocal));
+    if (derived && derived !== form.weekKey) {
+      setForm((f) => (f.weekKey === derived ? f : { ...f, weekKey: derived }));
+    }
+  }, [form.startsLocal, form.weekKey]);
+
   const handleLogout = async () => {
     await logout();
     redirectAfterSignOut(adminRoutes.dashboard);
@@ -186,7 +196,7 @@ export default function AdminWeeklyExamsPage() {
 
       const saved = await upsertSession({
         id: editingId || undefined,
-        weekKey: form.weekKey.trim() || weekKey,
+        weekKey: getIsoWeekKeyFromUtcIso(startsAt),
         day: form.day,
         title,
         examId: form.examId,
@@ -197,7 +207,13 @@ export default function AdminWeeklyExamsPage() {
         status: form.status,
       });
       const wasEdit = Boolean(editingId);
-      setNotice(wasEdit ? 'Session updated.' : 'Session created.');
+      setNotice(
+        wasEdit
+          ? 'Session updated and synced for students.'
+          : form.status === 'published'
+            ? 'Session published — students will see it for this weekend.'
+            : 'Session created as draft. Publish it so students can see it.',
+      );
       setEditingId(saved.id);
       setForm((f) => ({
         ...f,
@@ -438,8 +454,9 @@ export default function AdminWeeklyExamsPage() {
                       Week key
                       <input
                         value={form.weekKey}
-                        onChange={(e) => setForm((f) => ({ ...f, weekKey: e.target.value }))}
-                        className="mt-1 w-full h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold dark:border-slate-700 dark:bg-slate-950"
+                        readOnly
+                        title="Auto-set from start date (IST)"
+                        className="mt-1 w-full h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300"
                       />
                     </label>
                   </div>

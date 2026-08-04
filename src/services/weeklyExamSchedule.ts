@@ -1,10 +1,7 @@
 /**
  * Weekly exam schedule service.
- * Primary: Firestore `weeklyExamSchedules`
- * Fallback: localStorage (demo admin / offline / rules not deployed)
- *
- * Demo admins have no Firebase Auth token — Firestore calls can hang or
- * deny forever. Those sessions always use localStorage only.
+ * Primary: Firestore `weeklyExamSchedules` (works for demo via bridge secret)
+ * Fallback: localStorage (offline / rules not deployed yet)
  */
 import {
   collection,
@@ -28,19 +25,15 @@ import type {
 export const WEEKLY_EXAM_COLLECTION = 'weeklyExamSchedules';
 const LOCAL_KEY = 'aira-weekly-exam-schedules-v1';
 const IST = 'Asia/Kolkata';
-const FIRESTORE_TIMEOUT_MS = 4000;
+const FIRESTORE_TIMEOUT_MS = 8000;
+/** Must match firestore.rules weeklyBridgeOk() — lets demo admins publish to production. */
+const WEEKLY_BRIDGE_SECRET = 'aira_weekly_bridge_v1';
 
 function assertAdmin(): void {
   const { role } = useAuthStore.getState();
   if (role !== 'admin') {
     throw new Error('Only admins can manage weekly exam schedules.');
   }
-}
-
-/** Demo / unauthenticated clients cannot satisfy Firestore admin rules. */
-function useLocalOnly(): boolean {
-  const { isDemo } = useAuthStore.getState();
-  return Boolean(isDemo) || !auth.currentUser;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms = FIRESTORE_TIMEOUT_MS): Promise<T> {
@@ -121,24 +114,38 @@ export function istToUtcIso(
   second = 0,
 ): string {
   const asUtcGuess = Date.UTC(year, month - 1, day, hour, minute, second);
-  // IST is UTC+5:30 — convert by subtracting offset
   return new Date(asUtcGuess - (5 * 60 + 30) * 60 * 1000).toISOString();
 }
 
-/** ISO week key in IST, e.g. "2026-W32". */
-export function getIsoWeekKeyIst(date = new Date()): string {
-  const parts = getIstParts(date);
-  // Use Thursday of the IST week to determine ISO week year/number
-  const utcNoon = Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0);
-  const d = new Date(utcNoon);
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+/** Robust ISO week key for an IST civil Y-M-D (Mon-based ISO weeks). */
+export function getIsoWeekKeyFromIstCivil(year: number, month: number, day: number): string {
+  const target = new Date(Date.UTC(year, month - 1, day));
+  // ISO: Monday = 0 … Sunday = 6
+  const dayNr = (target.getUTCDay() + 6) % 7;
+  target.setUTCDate(target.getUTCDate() - dayNr + 3);
+  const isoYear = target.getUTCFullYear();
+  const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+  const firstDayNr = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNr + 3);
+  const weekNo = 1 + Math.round((target.getTime() - firstThursday.getTime()) / 604800000);
+  return `${isoYear}-W${String(weekNo).padStart(2, '0')}`;
 }
 
-/** Next Saturday and Sunday (IST civil dates) for the week containing `date`, or upcoming weekend. */
+/** ISO week key in IST for a Date, e.g. "2026-W32". */
+export function getIsoWeekKeyIst(date = new Date()): string {
+  const parts = getIstParts(date);
+  return getIsoWeekKeyFromIstCivil(parts.year, parts.month, parts.day);
+}
+
+/** Derive week key from a UTC ISO timestamp using its IST calendar day. */
+export function getIsoWeekKeyFromUtcIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return getIsoWeekKeyIst();
+  const parts = getIstParts(d);
+  return getIsoWeekKeyFromIstCivil(parts.year, parts.month, parts.day);
+}
+
+/** Next Saturday and Sunday (IST civil dates) for the week containing `date`. */
 export function getWeekendDatesIst(date = new Date()): {
   saturday: { y: number; m: number; d: number };
   sunday: { y: number; m: number; d: number };
@@ -146,8 +153,7 @@ export function getWeekendDatesIst(date = new Date()): {
   const parts = getIstParts(date);
   const utcNoon = Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0);
   const ref = new Date(utcNoon);
-  const dow = ref.getUTCDay(); // 0 Sun … 6 Sat (approx for civil day via noon)
-  // Map: find Saturday of this week (if today is Sun, Saturday was yesterday)
+  const dow = ref.getUTCDay(); // 0 Sun … 6 Sat
   const toSat = dow === 6 ? 0 : dow === 0 ? -1 : 6 - dow;
   const sat = new Date(ref);
   sat.setUTCDate(ref.getUTCDate() + toSat);
@@ -166,7 +172,7 @@ export function defaultWeekendWindowsIst(date = new Date()): {
 } {
   const { saturday, sunday } = getWeekendDatesIst(date);
   return {
-    weekKey: getIsoWeekKeyIst(date),
+    weekKey: getIsoWeekKeyFromIstCivil(saturday.y, saturday.m, saturday.d),
     saturday: {
       startsAt: istToUtcIso(saturday.y, saturday.m, saturday.d, 0, 0, 0),
       endsAt: istToUtcIso(saturday.y, saturday.m, saturday.d, 23, 59, 59),
@@ -218,15 +224,19 @@ function saveLocalSession(session: WeeklyExamSession): void {
 }
 
 function normalizeSession(data: Record<string, unknown>, id: string): WeeklyExamSession {
+  const startsAt = String(data.startsAt || '');
+  const weekKey =
+    String(data.weekKey || '') ||
+    (startsAt ? getIsoWeekKeyFromUtcIso(startsAt) : getIsoWeekKeyIst());
   return {
     id,
-    weekKey: String(data.weekKey || ''),
+    weekKey,
     day: (data.day === 'sunday' ? 'sunday' : 'saturday') as WeeklyExamDay,
     title: String(data.title || 'Weekly Exam'),
     examId: String(data.examId || 'jee-main'),
     subjectId: data.subjectId ? String(data.subjectId) : undefined,
     mode: data.mode === 'pyq' ? 'pyq' : 'mock',
-    startsAt: String(data.startsAt || ''),
+    startsAt,
     endsAt: String(data.endsAt || ''),
     status: (['draft', 'published', 'archived'].includes(String(data.status))
       ? data.status
@@ -250,13 +260,13 @@ function toFirestorePayload(session: WeeklyExamSession): Record<string, unknown>
     status: session.status,
     createdBy: session.createdBy,
     updatedAt: session.updatedAt,
+    bridgeSecret: WEEKLY_BRIDGE_SECRET,
   };
   if (session.subjectId) payload.subjectId = session.subjectId;
   return payload;
 }
 
 async function tryFirestoreWrite(session: WeeklyExamSession): Promise<boolean> {
-  if (useLocalOnly()) return false;
   try {
     await withTimeout(
       setDoc(doc(db, WEEKLY_EXAM_COLLECTION, session.id), toFirestorePayload(session), {
@@ -273,42 +283,72 @@ async function tryFirestoreWrite(session: WeeklyExamSession): Promise<boolean> {
 }
 
 async function tryFirestoreListAll(): Promise<WeeklyExamSession[] | null> {
-  if (useLocalOnly()) return null;
+  // Demo admins are not Firebase-authenticated — listing all requires admin rules.
+  // Prefer published-only public query for everyone; admins merge local drafts.
   try {
-    const snap = await withTimeout(getDocs(collection(db, WEEKLY_EXAM_COLLECTION)));
+    if (auth.currentUser) {
+      const snap = await withTimeout(getDocs(collection(db, WEEKLY_EXAM_COLLECTION)));
+      return snap.docs.map((d) => normalizeSession(d.data() as Record<string, unknown>, d.id));
+    }
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.warn('[weeklyExam] Firestore full list failed', err);
+    }
+  }
+  try {
+    const q = query(collection(db, WEEKLY_EXAM_COLLECTION), where('status', '==', 'published'));
+    const snap = await withTimeout(getDocs(q));
     return snap.docs.map((d) => normalizeSession(d.data() as Record<string, unknown>, d.id));
   } catch (err) {
     if (import.meta.env.DEV) {
-      console.warn('[weeklyExam] Firestore list failed, using local fallback', err);
+      console.warn('[weeklyExam] Firestore published list failed', err);
     }
     return null;
   }
 }
 
 async function tryFirestoreListPublished(weekKey: string): Promise<WeeklyExamSession[] | null> {
-  if (useLocalOnly()) return null;
   try {
     const q = query(
       collection(db, WEEKLY_EXAM_COLLECTION),
-      where('weekKey', '==', weekKey),
       where('status', '==', 'published'),
     );
     const snap = await withTimeout(getDocs(q));
-    return snap.docs.map((d) => normalizeSession(d.data() as Record<string, unknown>, d.id));
+    const all = snap.docs.map((d) => normalizeSession(d.data() as Record<string, unknown>, d.id));
+    return filterSessionsForStudentWeek(all, weekKey);
   } catch (err) {
-    // Composite index may be missing — fall back to client filter
-    try {
-      const snap = await withTimeout(getDocs(collection(db, WEEKLY_EXAM_COLLECTION)));
-      return snap.docs
-        .map((d) => normalizeSession(d.data() as Record<string, unknown>, d.id))
-        .filter((s) => s.weekKey === weekKey && s.status === 'published');
-    } catch (err2) {
-      if (import.meta.env.DEV) {
-        console.warn('[weeklyExam] Firestore published list failed', err, err2);
-      }
-      return null;
+    if (import.meta.env.DEV) {
+      console.warn('[weeklyExam] Firestore published list failed', err);
     }
+    return null;
   }
+}
+
+/**
+ * Show sessions for the student weekly tab:
+ * - matching weekKey, OR
+ * - start date falls in that ISO week (fixes bad manual week keys), OR
+ * - currently live / upcoming within the next 7 days
+ */
+export function filterSessionsForStudentWeek(
+  sessions: WeeklyExamSession[],
+  weekKey: string,
+  now = new Date(),
+): WeeklyExamSession[] {
+  const nowMs = now.getTime();
+  const weekAhead = nowMs + 7 * 24 * 60 * 60 * 1000;
+  return sessions.filter((s) => {
+    if (s.status !== 'published') return false;
+    if (s.weekKey === weekKey) return true;
+    if (s.startsAt && getIsoWeekKeyFromUtcIso(s.startsAt) === weekKey) return true;
+    const state = getSessionWindowState(s, now);
+    if (state === 'live') return true;
+    if (state === 'upcoming') {
+      const start = Date.parse(s.startsAt);
+      return !Number.isNaN(start) && start <= weekAhead;
+    }
+    return false;
+  });
 }
 
 function sortByUpdatedDesc(sessions: WeeklyExamSession[]): WeeklyExamSession[] {
@@ -321,7 +361,6 @@ function mergeById(
 ): WeeklyExamSession[] {
   const byId = new Map<string, WeeklyExamSession>();
   for (const s of remote) byId.set(s.id, s);
-  // Local wins on same id when newer (covers offline edits that never reached Firestore)
   for (const s of local) {
     const existing = byId.get(s.id);
     if (!existing || s.updatedAt >= existing.updatedAt) byId.set(s.id, s);
@@ -338,18 +377,21 @@ export async function listAllForAdmin(): Promise<WeeklyExamSession[]> {
 }
 
 export async function listPublishedForWeek(weekKey: string): Promise<WeeklyExamSession[]> {
-  const local = readLocal().filter((s) => s.weekKey === weekKey && s.status === 'published');
+  const local = filterSessionsForStudentWeek(
+    readLocal().filter((s) => s.status === 'published'),
+    weekKey,
+  );
   const remote = await tryFirestoreListPublished(weekKey);
   if (!remote) {
-    return local.sort((a, b) => a.day.localeCompare(b.day));
+    return local.sort((a, b) => a.day.localeCompare(b.day) || a.startsAt.localeCompare(b.startsAt));
   }
-  return mergeById(local, remote).sort((a, b) => a.day.localeCompare(b.day));
+  return mergeById(local, remote).sort(
+    (a, b) => a.day.localeCompare(b.day) || a.startsAt.localeCompare(b.startsAt),
+  );
 }
 
 export async function getSessionById(id: string): Promise<WeeklyExamSession | null> {
   const localHit = readLocal().find((s) => s.id === id) ?? null;
-  if (useLocalOnly()) return localHit;
-
   try {
     const snap = await withTimeout(getDoc(doc(db, WEEKLY_EXAM_COLLECTION, id)));
     if (snap.exists()) {
@@ -382,11 +424,14 @@ export async function upsertSession(input: WeeklyExamSessionInput): Promise<Week
     throw new Error('Exam is required.');
   }
 
+  // Always derive week key from the start time so students (current week) can find it
+  const weekKey = getIsoWeekKeyFromUtcIso(startsAt);
+
   const id = input.id || `wes_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const existing = input.id ? await getSessionById(input.id) : null;
   const session: WeeklyExamSession = {
     id,
-    weekKey: input.weekKey,
+    weekKey,
     day: input.day,
     title: input.title.trim() || 'Weekly Exam',
     examId: input.examId,
@@ -399,9 +444,13 @@ export async function upsertSession(input: WeeklyExamSessionInput): Promise<Week
     updatedAt: nowIso(),
   };
 
-  // Local-first so the admin UI never hangs on Firestore
   saveLocalSession(session);
-  await tryFirestoreWrite(session);
+  const remoteOk = await tryFirestoreWrite(session);
+  if (!remoteOk && session.status === 'published') {
+    throw new Error(
+      'Saved on this device, but cloud sync failed. Deploy Firestore rules, then click Update/Publish again so students on the live site can see this exam.',
+    );
+  }
   return session;
 }
 
@@ -497,10 +546,12 @@ export async function seedThisWeekendDefaults(): Promise<WeeklyExamSession[]> {
 export async function duplicateWeekToNext(fromWeekKey: string): Promise<WeeklyExamSession[]> {
   assertAdmin();
   const all = await listAllForAdmin();
-  const source = all.filter((s) => s.weekKey === fromWeekKey && s.status === 'published');
+  const source = all.filter((s) => {
+    const key = s.weekKey || getIsoWeekKeyFromUtcIso(s.startsAt);
+    return key === fromWeekKey && s.status === 'published';
+  });
   if (!source.length) throw new Error('No published sessions to duplicate for that week.');
 
-  // Approximate next week windows from current + 7 days
   const nextDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const windows = defaultWeekendWindowsIst(nextDate);
   const created: WeeklyExamSession[] = [];

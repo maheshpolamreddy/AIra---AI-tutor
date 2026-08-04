@@ -33,12 +33,18 @@ export default function WeeklyTestsFlow({ onExamStateChange }: WeeklyTestsFlowPr
   const [nowTick, setNowTick] = useState(() => Date.now());
 
   const weekKey = useMemo(() => getIsoWeekKeyIst(), []);
-  const weeklySessionId = searchParams.get('weeklySession') || searchParams.get('challenge');
+  const rawChallenge = searchParams.get('weeklySession') || searchParams.get('challenge');
 
-  const activeSession = useMemo(
-    () => sessions.find((s) => s.id === weeklySessionId) ?? null,
-    [sessions, weeklySessionId],
-  );
+  const activeSession = useMemo(() => {
+    if (!rawChallenge) return null;
+    const found = sessions.find((s) => s.id === rawChallenge);
+    if (found) return found;
+    // Ignore legacy static challenge ids like "speed-sprint"
+    if (!rawChallenge.startsWith('wes_')) return null;
+    return null;
+  }, [sessions, rawChallenge]);
+
+  const weeklySessionId = activeSession?.id ?? null;
 
   const refresh = useCallback(async () => {
     setLoading(true);
