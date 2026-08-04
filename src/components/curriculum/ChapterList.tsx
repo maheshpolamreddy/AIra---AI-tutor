@@ -335,8 +335,8 @@ function SubjectHeader({
 }
 
 export default function ChapterList({ onTopicSelect }: ChapterListProps) {
-  const getProgress = useCurriculumStore((s) => s.getProgress);
-  const [searchParams] = useSearchParams();
+  const progressMap = useCurriculumStore((s) => s.progressMap);
+  const [searchParams, setSearchParams] = useSearchParams();
   const gradeId = searchParams.get('grade');
   const subjectId = searchParams.get('subject');
 
@@ -344,10 +344,26 @@ export default function ChapterList({ onTopicSelect }: ChapterListProps) {
   const subject = grade && subjectId ? getSubjectById(grade.id, subjectId) : null;
 
   if (!grade || !subject) {
-    return null;
+    return (
+      <div className="curr-empty">
+        <span style={{ background: 'rgba(14,165,233,0.12)', color: '#0284c7' }}>
+          <BookOpen className="h-6 w-6" />
+        </span>
+        <h3>Subject not found</h3>
+        <p>This curriculum link is invalid or out of date. Pick a grade and subject to continue.</p>
+        <button
+          type="button"
+          className="mt-4 inline-flex h-10 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white"
+          style={{ background: '#0ea5e9' }}
+          onClick={() => setSearchParams(gradeId ? { grade: gradeId } : {})}
+        >
+          {gradeId ? 'Back to subjects' : 'Back to grades'}
+        </button>
+      </div>
+    );
   }
 
-  const progress = getProgress(grade.id, subject.id);
+  const progress = progressMap[`${grade.id}-${subject.id}`] || null;
   const completedTopics = progress?.completedTopics || [];
   const totalTopics = subject.chapters.reduce((sum, ch) => sum + (ch.topics?.length || 0), 0);
   const accent = subject.color || '#0ea5e9';

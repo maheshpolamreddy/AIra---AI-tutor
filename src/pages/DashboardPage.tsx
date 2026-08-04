@@ -44,6 +44,13 @@ export default function DashboardPage() {
   const learnerName = firstName(displayNameForUser(user));
 
   const filteredTopics = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const matchesQuery = (t: TopicCardModel) =>
+      !q ||
+      t.name.toLowerCase().includes(q) ||
+      t.subject.toLowerCase().includes(q) ||
+      t.grade.toLowerCase().includes(q);
+
     let base: TopicCardModel[] = [];
     if (activeCategory === 'For You') {
       const ranked = [...insights.allTopics].sort((a, b) => {
@@ -55,21 +62,14 @@ export default function DashboardPage() {
           (insights.nextTopic?.id === t.id ? 500 : 0);
         return score(b) - score(a);
       });
-      base = ranked.slice(0, 8);
+      // When searching, scan the full catalog; otherwise keep the recommended top 8
+      base = q ? ranked.filter(matchesQuery) : ranked.slice(0, 8);
     } else {
       base = insights.allTopics.filter(
         (t) =>
-          t.subject === activeCategory ||
-          t.subjectId === activeCategory.toLowerCase().replace(/\s+/g, '-')
-      );
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      base = base.filter(
-        (t) =>
-          t.name.toLowerCase().includes(q) ||
-          t.subject.toLowerCase().includes(q) ||
-          t.grade.toLowerCase().includes(q)
+          (t.subject === activeCategory ||
+            t.subjectId === activeCategory.toLowerCase().replace(/\s+/g, '-')) &&
+          matchesQuery(t)
       );
     }
     return base.slice(0, 8);
@@ -104,7 +104,10 @@ export default function DashboardPage() {
   const homeLearn =
     'learn' in routes
       ? (routes as typeof studentRoutes).learn(
-          currentSession?.topicId || insights.nextTopic?.id || 'math-6-1-knowing-numbers'
+          currentSession?.topicId ||
+            insights.nextTopic?.id ||
+            insights.allTopics[0]?.id ||
+            'math-6-1-large-numbers'
         )
       : routes.dashboard;
 

@@ -145,9 +145,12 @@ export const useAuthStore = create<AuthStore>()(
 
                 const user = mapFirebaseUser(fbUser);
                 // Unblock UI immediately with an optimistic role, then refine from
-                // Firestore. The hint written by the landing app at sign-in is what
-                // avoids a student-shaped first paint for teachers and admins.
-                const cachedRole = normalizeAppRole(get().role ?? readRoleHint() ?? 'student');
+                // Firestore. Prefer the landing role hint — never carry a prior
+                // demo admin/teacher persona into a real Firebase session.
+                const wasDemo = get().isDemo;
+                const cachedRole = normalizeAppRole(
+                    readRoleHint() ?? (wasDemo ? 'student' : get().role) ?? 'student',
+                );
                 set({
                     user,
                     isAuthenticated: true,
@@ -311,21 +314,29 @@ export const useAuthStore = create<AuthStore>()(
 
             skipToDemo: () => {
                 const user = createDemoUser('Student');
+                clearRoleHint();
                 set({ user, isAuthenticated: true, isGuest: false, role: 'student', isDemo: true });
             },
 
             enterStudentDemo: () => {
                 const user = createDemoUser('Student');
+                clearRoleHint();
+                writeRoleHint('student');
                 set({ user, isAuthenticated: true, isGuest: false, role: 'student', isDemo: true });
             },
 
             enterTeacherDemo: () => {
                 const user = createDemoUser('Teacher');
+                clearRoleHint();
+                writeRoleHint('teacher');
                 set({ user, isAuthenticated: true, isGuest: false, role: 'teacher', isDemo: true });
             },
 
             enterAdminDemo: () => {
                 const user = createDemoUser('Admin');
+                // Do not leave a sticky admin role hint — that would send a later
+                // real student login to /admin before Firestore resolves.
+                clearRoleHint();
                 set({ user, isAuthenticated: true, isGuest: false, role: 'admin', isDemo: true });
             },
 

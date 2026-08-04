@@ -271,21 +271,7 @@ html.dark .dash-avatar-frame,
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  padding: 2px 2px 4px;
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 12px,
-    #000 calc(100% - 12px),
-    transparent 100%
-  );
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 12px,
-    #000 calc(100% - 12px),
-    transparent 100%
-  );
+  padding: 2px 4px 4px;
 }
 
 .topic-filter-rail__track::-webkit-scrollbar {

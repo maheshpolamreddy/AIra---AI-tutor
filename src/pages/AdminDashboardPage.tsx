@@ -115,6 +115,12 @@ export default function AdminDashboardPage() {
             </Link>
 
             <nav className="flex items-center gap-2">
+              <Link
+                to={adminRoutes.weeklyExams}
+                className="hidden sm:inline-flex h-9 items-center gap-1.5 rounded-xl border border-amber-200/80 bg-amber-50 px-3 text-xs font-bold text-amber-800 hover:bg-amber-100 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200"
+              >
+                Weekly exams
+              </Link>
               <motion.button
                 whileHover={{ scale: 1.1, rotate: 180 }}
                 whileTap={{ scale: 0.9 }}

@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return signedIn() && userRole() == 'admin';
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if signedIn() && request.auth.uid == userId;
+    }
+
+    // Weekly Sat/Sun exam schedules — admin writes; students read published only
+    match /weeklyExamSchedules/{sessionId} {
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.status == 'published');
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}

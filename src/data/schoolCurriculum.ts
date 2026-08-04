@@ -191,9 +191,6 @@ function createEnglishChapters(gradeNumber: number): Chapter[] {
             { id: 'eng-10-1', name: 'A Letter to God', chapterNumber: 1, topics: createTopics(['Faith', 'Irony', 'Literary Devices'], 'eng-10-1') },
             { id: 'eng-10-2', name: 'Nelson Mandela', chapterNumber: 2, topics: createTopics(['Autobiography', 'Freedom', 'Leadership'], 'eng-10-2') },
             { id: 'eng-10-3', name: 'Two Stories About Flying', chapterNumber: 3, topics: createTopics(['Adventure', 'Courier', 'Narrative'], 'eng-10-3') },
-            { id: 'eng-10-1', name: 'A Letter to God', chapterNumber: 1, topics: createTopics(['Letter to God'], 'eng-10-1') },
-            { id: 'eng-10-2', name: 'Nelson Mandela', chapterNumber: 2, topics: createTopics(['Nelson Mandela'], 'eng-10-2') },
-            { id: 'eng-10-3', name: 'Two Stories About Flying', chapterNumber: 3, topics: createTopics(['Two Stories Flying'], 'eng-10-3') },
             { id: 'eng-10-4', name: 'Diary of Anne Frank', chapterNumber: 4, topics: createTopics(['Diary Anne Frank'], 'eng-10-4') },
             { id: 'eng-10-5', name: 'The Hundred Dresses', chapterNumber: 5, topics: createTopics(['Hundred Dresses'], 'eng-10-5') },
         ],
@@ -231,8 +228,8 @@ function createHindiChapters(gradeNumber: number): Chapter[] {
         ];
     }
     return chapters[gradeNumber] || [
-        { id: `hin-${gradeNumber}-1`, name: 'पाठ 1', chapterNumber: 1, topics: createTopics(['पठन', 'व्याकरण', 'लेखन'], `hin-${gradeNumber}`) },
-        { id: `hin-${gradeNumber}-2`, name: 'पाठ 2', chapterNumber: 2, topics: createTopics(['कविता', 'शब्द भंडार', 'अभ्यास'], `hin-${gradeNumber}`) },
+        { id: `hin-${gradeNumber}-1`, name: 'पाठ 1', chapterNumber: 1, topics: createTopics(['पठन', 'व्याकरण', 'लेखन'], `hin-${gradeNumber}-1`) },
+        { id: `hin-${gradeNumber}-2`, name: 'पाठ 2', chapterNumber: 2, topics: createTopics(['कविता', 'शब्द भंडार', 'अभ्यास'], `hin-${gradeNumber}-2`) },
     ];
 }
 
@@ -474,15 +471,31 @@ function createCSChapters(gradeNumber: number): Chapter[] {
 
 // Helper function to create topics from names
 function createTopics(topicNames: string[], prefix?: string): Topic[] {
-    return topicNames.map((name, index) => ({
-        id: prefix
-            ? `${prefix}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/g, '')}`
-            : name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/g, ''),
-        name,
-        difficulty: index === 0 ? 'beginner' : index === topicNames.length - 1 ? 'advanced' : 'intermediate',
-        duration: `${20 + index * 5} min`,
-        progress: 0
-    }));
+    const usedIds = new Set<string>();
+    return topicNames.map((name, index) => {
+        let slug = name
+            .normalize('NFKD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        // Non-Latin names (e.g. Hindi) collapse to empty with ASCII-only slugify
+        if (!slug) slug = `topic-${index + 1}`;
+
+        let id = prefix ? `${prefix}-${slug}` : slug;
+        if (usedIds.has(id)) {
+            id = `${id}-${index + 1}`;
+        }
+        usedIds.add(id);
+
+        return {
+            id,
+            name,
+            difficulty: index === 0 ? 'beginner' : index === topicNames.length - 1 ? 'advanced' : 'intermediate',
+            duration: `${20 + index * 5} min`,
+            progress: 0,
+        };
+    });
 }
 
 // ============================================

@@ -53,6 +53,7 @@ export const teacherRoutes = {
 
 export const adminRoutes = {
   dashboard: '/admin/dashboard',
+  weeklyExams: '/admin/weekly-exams',
   settings: '/admin/settings',
   profile: '/admin/profile',
 };

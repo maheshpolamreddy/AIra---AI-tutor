@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
     Activity,
@@ -12,13 +13,27 @@ import {
 } from 'lucide-react';
 import {
     computeCompetitiveInsights,
+    type CompetitiveAttemptMode,
     useCompetitiveStore,
 } from '../../stores/competitiveStore';
 import { PremiumMetricCard } from './CompetitiveCards';
 
+const MODE_FILTERS: Array<{ id: 'all' | CompetitiveAttemptMode; label: string }> = [
+    { id: 'all', label: 'All' },
+    { id: 'weekly', label: 'Weekly' },
+    { id: 'mock', label: 'Mock' },
+    { id: 'pyq', label: 'PYQ' },
+    { id: 'standard', label: 'Standard' },
+];
+
 export default function PerformanceAnalytics() {
     const attempts = useCompetitiveStore((s) => s.attempts);
-    const insights = computeCompetitiveInsights(attempts);
+    const [modeFilter, setModeFilter] = useState<'all' | CompetitiveAttemptMode>('all');
+    const filteredAttempts = useMemo(
+        () => (modeFilter === 'all' ? attempts : attempts.filter((a) => a.mode === modeFilter)),
+        [attempts, modeFilter],
+    );
+    const insights = computeCompetitiveInsights(filteredAttempts);
 
     return (
         <div className="comp-analytics space-y-8">
@@ -53,6 +68,23 @@ export default function PerformanceAnalytics() {
                     </div>
                 </div>
             </header>
+
+            <div className="flex flex-wrap gap-2">
+                {MODE_FILTERS.map((f) => (
+                    <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setModeFilter(f.id)}
+                        className={`rounded-full px-3.5 py-1.5 text-[11px] font-black uppercase tracking-wider transition ${
+                            modeFilter === f.id
+                                ? 'bg-orange-600 text-white shadow-md shadow-orange-500/25'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                        }`}
+                    >
+                        {f.label}
+                    </button>
+                ))}
+            </div>
 
             <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
                 <PremiumMetricCard
@@ -156,13 +188,13 @@ export default function PerformanceAnalytics() {
                 </ul>
             </section>
 
-            {attempts.length > 0 && (
+            {filteredAttempts.length > 0 && (
                 <section className="comp-surface-card p-5 sm:p-6">
                     <h3 className="mb-4 text-sm font-black uppercase tracking-[0.14em] text-slate-700 dark:text-slate-200">
-                        Recent attempts
+                        Recent attempts{modeFilter !== 'all' ? ` · ${modeFilter}` : ''}
                     </h3>
                     <div className="space-y-2">
-                        {attempts.slice(0, 8).map((a) => (
+                        {filteredAttempts.slice(0, 8).map((a) => (
                             <div
                                 key={a.id}
                                 className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/40"

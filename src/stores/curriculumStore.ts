@@ -82,7 +82,7 @@ export const useCurriculumStore = create<CurriculumState>()(
                 const existing = progressMap[key];
                 const totalTopics = getTotalTopicsInSubject(gradeId, subjectId);
 
-                const completedTopics = existing?.completedTopics || [];
+                const completedTopics = [...(existing?.completedTopics || [])];
                 if (!completedTopics.includes(topicId)) {
                     completedTopics.push(topicId);
                 }
@@ -92,7 +92,10 @@ export const useCurriculumStore = create<CurriculumState>()(
                     subjectId,
                     completedTopics,
                     totalTopics,
-                    progressPercent: Math.round((completedTopics.length / totalTopics) * 100),
+                    progressPercent:
+                        totalTopics > 0
+                            ? Math.round((completedTopics.length / totalTopics) * 100)
+                            : 0,
                     lastAccessedAt: new Date().toISOString()
                 };
 
@@ -130,12 +133,11 @@ export const useCurriculumStore = create<CurriculumState>()(
             },
 
             clearSelection: () => {
+                // Keep lastAccessed* so dashboard recommendations survive curriculum navigation
                 set({
                     selectedGrade: null,
                     selectedSubject: null,
                     selectedChapter: null,
-                    lastAccessedGrade: null,
-                    lastAccessedSubject: null
                 });
             }
         }),
@@ -146,17 +148,16 @@ export const useCurriculumStore = create<CurriculumState>()(
                 lastAccessedGrade: state.lastAccessedGrade,
                 lastAccessedSubject: state.lastAccessedSubject
             }),
-            // On refresh: restore the last section (grade + subject) so the user stays where they left off
-            merge: (state, partial) => {
-                const merged = { ...(state as CurriculumState), ...partial } as CurriculumState;
-                if (partial?.lastAccessedGrade) {
-                    merged.selectedGrade = getGradeById(partial.lastAccessedGrade) || null;
-                    merged.selectedSubject = null;
+            // Zustand persist: merge(persistedState, currentState)
+            merge: (persistedState, currentState) => {
+                const persisted = (persistedState ?? {}) as Partial<CurriculumState>;
+                const merged = { ...currentState, ...persisted } as CurriculumState;
+                if (persisted.lastAccessedGrade) {
+                    merged.selectedGrade = getGradeById(persisted.lastAccessedGrade) || null;
+                    merged.selectedSubject = persisted.lastAccessedSubject
+                        ? getSubjectById(persisted.lastAccessedGrade, persisted.lastAccessedSubject) || null
+                        : null;
                     merged.selectedChapter = null;
-                    if (partial.lastAccessedSubject) {
-                        merged.selectedSubject = getSubjectById(partial.lastAccessedGrade, partial.lastAccessedSubject) || null;
-                        merged.selectedChapter = null;
-                    }
                 }
                 return merged;
             }

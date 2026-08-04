@@ -10,6 +10,8 @@ import ExamCard from './ExamCard';
 import LiveExamPanel from './LiveExamPanel';
 import { useCompetitiveStore } from '../../stores/competitiveStore';
 import { PremiumMetricCard, PremiumSelectionCard } from './CompetitiveCards';
+import type { WeeklyExamSession } from '../../types/weeklyExam';
+import { isSessionLive } from '../../services/weeklyExamSchedule';
 import {
     clearExamDraft,
     findExam,
@@ -27,14 +29,23 @@ import {
 interface ExamFlowProps {
     isDashboardView?: boolean;
     onExamStateChange?: (isActive: boolean) => void;
-    flowType?: 'standard' | 'pyq' | 'mock';
+    flowType?: 'standard' | 'pyq' | 'mock' | 'weekly';
+    weeklySession?: WeeklyExamSession | null;
 }
 
-export default function ExamFlow({ isDashboardView = false, onExamStateChange, flowType = 'standard' }: ExamFlowProps = {}) {
+export default function ExamFlow({
+    isDashboardView = false,
+    onExamStateChange,
+    flowType = 'standard',
+    weeklySession = null,
+}: ExamFlowProps = {}) {
     const navigate = useNavigate();
     const location = useLocation();
     const [searchParams, setSearchParams] = useSearchParams();
     const recordAttempt = useCompetitiveStore((s) => s.recordAttempt);
+    const weeklyAutoStartedRef = useRef(false);
+    const paperFlow = flowType === 'pyq' || (flowType === 'weekly' && weeklySession?.mode === 'pyq');
+    const mockFlow = flowType === 'mock' || (flowType === 'weekly' && weeklySession?.mode === 'mock');
 
     /**
      * The flow is addressed entirely by the URL, so a refresh or a back button
@@ -156,9 +167,9 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
         if ((step === 'solving' || step === 'result') && questions.length === 0) {
             if (!selectedExam) goToStep('exam', {}, { replace: true });
             else if (!selectedSubject) goToStep('subject', {}, { replace: true });
-            else goToStep(flowType === 'pyq' ? 'paper' : 'subject', {}, { replace: true });
+            else goToStep(paperFlow ? 'paper' : 'subject', {}, { replace: true });
         }
-    }, [step, selectedExam, selectedSubject, questions.length, isGenerating, flowType, goToStep]);
+    }, [step, selectedExam, selectedSubject, questions.length, isGenerating, flowType, paperFlow, goToStep]);
 
     // A reload mid-paper would silently discard the attempt without a prompt.
     useEffect(() => {
@@ -242,7 +253,14 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
             examName: selectedExam.name,
             subjectId: selectedSubject.id,
             subjectName: selectedSubject.name,
-            mode: flowType === 'pyq' ? 'pyq' : flowType === 'mock' ? 'mock' : 'standard',
+            mode:
+                flowType === 'weekly'
+                    ? 'weekly'
+                    : flowType === 'pyq'
+                      ? 'pyq'
+                      : flowType === 'mock'
+                        ? 'mock'
+                        : 'standard',
             score,
             total: questions.length,
             timeSeconds: elapsedSeconds || Math.max(0, (selectedExam.timeMinutes * 60) - timer),
@@ -307,10 +325,25 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
 
     const exitToSelection = useCallback(() => {
         resetExam();
+        weeklyAutoStartedRef.current = false;
+        if (flowType === 'weekly') {
+            updateFlowParams(
+                {
+                    weeklySession: null,
+                    challenge: null,
+                    step: null,
+                    exam: null,
+                    subject: null,
+                    paper: null,
+                },
+                { replace: true },
+            );
+            return;
+        }
         if (flowType === 'pyq' && selectedSubject) goToStep('paper', { paper: null });
         else if (selectedExam) goToStep('subject', { paper: null });
         else goToStep('exam');
-    }, [flowType, goToStep, resetExam, selectedExam, selectedSubject]);
+    }, [flowType, goToStep, resetExam, selectedExam, selectedSubject, updateFlowParams]);
 
     const handleBack = () => {
         if (step === 'result') {
@@ -318,8 +351,13 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
         } else if (step === 'solving') {
             const confirmQuit = window.confirm('Leave this exam? Your answers for this attempt will be discarded.');
             if (confirmQuit) exitToSelection();
-        } else if (step === 'paper') goToStep('subject', { paper: null });
-        else if (step === 'subject') goToStep('exam');
+        } else if (step === 'paper') {
+            if (flowType === 'weekly' && weeklySession?.subjectId) exitToSelection();
+            else goToStep('subject', { paper: null });
+        } else if (step === 'subject') {
+            if (flowType === 'weekly' && weeklySession?.examId) exitToSelection();
+            else goToStep('exam');
+        }
     };
 
     const handleExamSelect = (exam: Exam) => {
@@ -382,13 +420,19 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
 
     /** Full AI exam generation: syllabus-aligned, batched, fresh session each call. */
     const generateAndStartExam = async (exam: Exam, subject: ExamSubject, paperOverride?: Paper | null) => {
+        if (flowType === 'weekly') {
+            if (!weeklySession || !isSessionLive(weeklySession)) {
+                window.alert('This weekly exam window has closed.');
+                exitToSelection();
+                return;
+            }
+        }
         setIsGenerating(true);
         try {
             const year = resolveExamYear(exam, paperOverride !== undefined ? paperOverride : selectedPaper);
-            const count =
-                flowType === 'mock'
-                    ? Math.min(subject.questionsCount, Math.max(15, Math.round(subject.questionsCount * 0.6)))
-                    : subject.questionsCount;
+            const count = mockFlow
+                ? Math.min(subject.questionsCount, Math.max(15, Math.round(subject.questionsCount * 0.6)))
+                : subject.questionsCount;
             const finalQuestions = await aiExamGenerator.generateAIExamPaper({
                 examId: exam.id,
                 examName: exam.name,
@@ -396,7 +440,7 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                 subjectName: subject.name,
                 count,
                 examYear: year,
-                mode: flowType === 'pyq' ? 'pyq' : 'mock',
+                mode: paperFlow ? 'pyq' : 'mock',
             });
             applyQuestionsAndStartSolving(
                 finalQuestions,
@@ -411,11 +455,31 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
         }
     };
 
+    // Weekly mock deep-link: exam + subject preselected → generate immediately while live
+    useEffect(() => {
+        if (flowType !== 'weekly' || !weeklySession) return;
+        if (!isSessionLive(weeklySession)) return;
+        if (!mockFlow || !selectedExam || !selectedSubject) return;
+        if (step !== 'subject' || questions.length > 0 || isGenerating) return;
+        if (weeklyAutoStartedRef.current) return;
+        weeklyAutoStartedRef.current = true;
+        void generateAndStartExam(selectedExam, selectedSubject, null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-shot deep-link start
+    }, [
+        flowType,
+        weeklySession,
+        mockFlow,
+        selectedExam,
+        selectedSubject,
+        step,
+        questions.length,
+        isGenerating,
+    ]);
+
     const handleSubjectSelect = async (subject: ExamSubject) => {
-        if (flowType === 'standard') {
-            if (!selectedExam) return;
-            // Reflect the choice immediately so the generating screen (and a
-            // reload during generation) still knows which subject is loading.
+        if (!selectedExam) return;
+        // Standard + weekly mock start immediately; PYQ / mock catalog still pick a year paper
+        if (flowType === 'standard' || (flowType === 'weekly' && weeklySession?.mode === 'mock')) {
             updateFlowParams({ subject: subject.id, paper: null }, { replace: true });
             await generateAndStartExam(selectedExam, subject, null);
         } else {
@@ -654,14 +718,23 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                     >
                         <div className="mb-8 hidden lg:block">
                             <h2 className="text-4xl font-black text-gray-900 dark:text-white tracking-tighter mb-2">
-                                {flowType === 'mock' ? 'Full-length mocks' : flowType === 'pyq' ? 'Previous year papers' : 'Available exams'}
+                                {flowType === 'weekly'
+                                    ? 'Weekly exam'
+                                    : flowType === 'mock'
+                                      ? 'Full-length mocks'
+                                      : flowType === 'pyq'
+                                        ? 'Previous year papers'
+                                        : 'Available exams'}
                             </h2>
                             <p className="text-lg text-slate-500 dark:text-slate-400 font-medium">
-                                {flowType === 'mock'
-                                    ? 'Timed simulation papers with exam-style pressure and negative marking.'
-                                    : flowType === 'pyq'
-                                      ? 'Authentic year-tagged papers to master recurring patterns.'
-                                      : 'Choose your target examination — each card carries a distinct identity and syllabus path.'}
+                                {flowType === 'weekly'
+                                    ? weeklySession?.title ||
+                                      'Complete the published weekend assessment while the live window is open.'
+                                    : flowType === 'mock'
+                                      ? 'Timed simulation papers with exam-style pressure and negative marking.'
+                                      : flowType === 'pyq'
+                                        ? 'Authentic year-tagged papers to master recurring patterns.'
+                                        : 'Choose your target examination — each card carries a distinct identity and syllabus path.'}
                             </p>
                         </div>
                         
@@ -671,7 +744,15 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                                     key={exam.id}
                                     exam={exam}
                                     index={i}
-                                    badge={flowType === 'mock' ? 'Mock' : flowType === 'pyq' ? 'PYQ' : undefined}
+                                    badge={
+                                        flowType === 'weekly'
+                                            ? 'Weekly'
+                                            : flowType === 'mock'
+                                              ? 'Mock'
+                                              : flowType === 'pyq'
+                                                ? 'PYQ'
+                                                : undefined
+                                    }
                                     onSelect={handleExamSelect}
                                 />
                             ))}
@@ -738,7 +819,13 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                                         accent={theme.color}
                                         image={bgUrl}
                                         index={i}
-                                        badge={flowType === 'mock' ? 'Mock track' : 'Subject'}
+                                        badge={
+                                            flowType === 'weekly'
+                                                ? 'Weekly'
+                                                : flowType === 'mock'
+                                                  ? 'Mock track'
+                                                  : 'Subject'
+                                        }
                                         onClick={() => handleSubjectSelect(subject)}
                                     />
                                 );
@@ -939,7 +1026,7 @@ export default function ExamFlow({ isDashboardView = false, onExamStateChange, f
                                             await generateAndStartExam(
                                                 selectedExam,
                                                 selectedSubject,
-                                                flowType === 'pyq' ? selectedPaper : null
+                                                paperFlow ? selectedPaper : null
                                             );
                                         })();
                                     }}

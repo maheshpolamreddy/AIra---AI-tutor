@@ -253,7 +253,7 @@ const SubjectCard = ({
 };
 
 export default function SubjectGrid({ onSubjectSelect }: SubjectGridProps) {
-    const getProgress = useCurriculumStore((s) => s.getProgress);
+    const progressMap = useCurriculumStore((s) => s.progressMap);
     const [searchParams] = useSearchParams();
     const gradeId = searchParams.get('grade');
 
@@ -266,6 +266,8 @@ export default function SubjectGrid({ onSubjectSelect }: SubjectGridProps) {
             onSubjectSelect(subjectId);
         }
     };
+
+    const getProgress = (subjectId: string) => progressMap[`${grade.id}-${subjectId}`] || null;
 
     return (
         <div className="space-y-8">
@@ -287,7 +289,7 @@ export default function SubjectGrid({ onSubjectSelect }: SubjectGridProps) {
             {/* Subject grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 lg:gap-6">
                 {grade.subjects.map((subject) => {
-                    const progress = getProgress(grade.id, subject.id);
+                    const progress = getProgress(subject.id);
                     return (
                         <div key={subject.id} className="h-full w-full">
                             <SubjectCard

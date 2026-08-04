@@ -32,6 +32,7 @@ export const FLOW_PARAMS = [
     'topic',
     'chapter',
     'challenge',
+    'weeklySession',
     'q',
 ] as const;
 

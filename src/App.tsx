@@ -28,6 +28,7 @@ const StudentModeSelectionPage = lazy(() => import('./pages/StudentModeSelection
 const StudentCompetitivePage = lazy(() => import('./pages/StudentCompetitivePage'));
 const TeacherDashboardPage = lazy(() => import('./pages/TeacherDashboardPage'));
 const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage'));
+const AdminWeeklyExamsPage = lazy(() => import('./pages/AdminWeeklyExamsPage'));
 const CompetitiveTeachingPage = lazy(() => import('./pages/CompetitiveTeachingPage'));
 
 /** Sync Firebase Auth (shared with landing) into the tutor Zustand store. */
@@ -80,8 +81,27 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function RoleGuard({ allowedRole, children }: { allowedRole: AppRole; children: React.ReactNode }) {
   const role = useAuthStore((state) => state.role);
+  const isDemo = useAuthStore((state) => state.isDemo);
   const location = useLocation();
   const pathRole = getRoleFromPath(location.pathname);
+
+  // Demo sessions persist the last persona (e.g. admin). Opening /student/... must
+  // switch to the student demo instead of bouncing back to /admin.
+  const needsDemoSwitch = Boolean(
+    isDemo && pathRole && pathRole === allowedRole && role !== allowedRole,
+  );
+
+  useEffect(() => {
+    if (!needsDemoSwitch || !pathRole) return;
+    const store = useAuthStore.getState();
+    if (pathRole === 'student') store.enterStudentDemo();
+    else if (pathRole === 'teacher') store.enterTeacherDemo();
+    else if (pathRole === 'admin') store.enterAdminDemo();
+  }, [needsDemoSwitch, pathRole]);
+
+  if (needsDemoSwitch) {
+    return <FullPageLoader message="" />;
+  }
 
   if (role !== allowedRole || pathRole !== allowedRole) {
     return <Navigate to={homeForRole(role)} replace />;
@@ -428,6 +448,18 @@ function AppRoutes() {
               <ProtectedRoute>
                 <RoleGuard allowedRole="admin">
                   <AdminDashboardPage />
+                </RoleGuard>
+              </ProtectedRoute>
+            </Suspense>
+          }
+        />
+        <Route
+          path="/admin/weekly-exams"
+          element={
+            <Suspense fallback={<FullPageLoader message="Loading..." />}>
+              <ProtectedRoute>
+                <RoleGuard allowedRole="admin">
+                  <AdminWeeklyExamsPage />
                 </RoleGuard>
               </ProtectedRoute>
             </Suspense>

@@ -43,6 +43,9 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // Listen on IPv4 so the Next.js landing proxy (localhost→127.0.0.1 on Windows)
+    // does not get ECONNREFUSED / Internal Server Error when Vite only binds [::1].
+    host: '127.0.0.1',
     // When the SPA is opened via the landing proxy (localhost:3000), absolute
     // module URLs and HMR must stay on that origin or deps like pdfjs break.
     origin: process.env.VITE_DEV_ORIGIN || 'http://localhost:3000',
