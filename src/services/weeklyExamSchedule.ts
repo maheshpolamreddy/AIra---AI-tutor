@@ -34,11 +34,29 @@ function apiBase(): string {
   const configured = (import.meta.env.VITE_LANDING_ORIGIN as string | undefined)?.replace(/\/$/, '');
   if (typeof window !== 'undefined') {
     const { port, hostname } = window.location;
+    const isLocal =
+      hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+    // When opened via landing (:3000) or any local host, always use same-origin /api.
+    if (isLocal && port !== '5173' && port !== '4173') return '';
     // Tutor standalone ports talk to landing for the shared schedule API
     if ((port === '5173' || port === '4173') && configured) return configured;
+    if ((port === '5173' || port === '4173') && !configured) return 'http://127.0.0.1:3000';
     if (hostname.includes('ai-ra-app') && configured) return configured;
   }
   return configured || '';
+}
+
+async function fetchStaticSeed(all = false): Promise<WeeklyExamSession[]> {
+  try {
+    const res = await fetch('/weekly-exam-schedules.json', { cache: 'no-store' });
+    if (!res.ok) return [];
+    const data = (await res.json()) as WeeklyExamSession[];
+    if (!Array.isArray(data)) return [];
+    const list = data.map((s) => normalizeSession(s as unknown as Record<string, unknown>, s.id));
+    return all ? list : list.filter((s) => s.status === 'published');
+  } catch {
+    return [];
+  }
 }
 
 async function fetchJsonStore(all = false): Promise<WeeklyExamSession[]> {
@@ -48,34 +66,32 @@ async function fetchJsonStore(all = false): Promise<WeeklyExamSession[]> {
     '',
   ].filter((v, i, a) => a.indexOf(v) === i);
 
+  let fromApi: WeeklyExamSession[] = [];
   for (const base of bases) {
     try {
-      const url = `${base}/api/weekly-exams${all ? '?all=1' : ''}`;
-      const res = await fetch(url, { credentials: 'same-origin' });
+      const url = `${base}/api/weekly-exams${all ? `?all=1&bridgeSecret=${encodeURIComponent(WEEKLY_BRIDGE_SECRET)}` : ''}`;
+      const res = await fetch(url, {
+        credentials: 'same-origin',
+        headers: all ? { 'x-aira-weekly-bridge': WEEKLY_BRIDGE_SECRET } : undefined,
+      });
       if (!res.ok) continue;
       const data = (await res.json()) as { sessions?: WeeklyExamSession[] };
       if (Array.isArray(data.sessions)) {
-        return data.sessions.map((s) => normalizeSession(s as unknown as Record<string, unknown>, s.id));
+        fromApi = data.sessions.map((s) =>
+          normalizeSession(s as unknown as Record<string, unknown>, s.id),
+        );
+        break;
       }
     } catch {
       /* try next */
     }
   }
 
-  // Static seed shipped with the tutor build (works even if API is cold)
-  try {
-    const res = await fetch('/weekly-exam-schedules.json', { cache: 'no-store' });
-    if (res.ok) {
-      const data = (await res.json()) as WeeklyExamSession[];
-      if (Array.isArray(data)) {
-        const list = data.map((s) => normalizeSession(s as unknown as Record<string, unknown>, s.id));
-        return all ? list : list.filter((s) => s.status === 'published');
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return [];
+  // Merge API with the shipped static seed so a partial/stale API never hides a weekend day.
+  const fromStatic = await fetchStaticSeed(all);
+  if (!fromApi.length) return fromStatic;
+  if (!fromStatic.length) return fromApi;
+  return mergeById(fromStatic, fromApi);
 }
 
 async function postJsonStore(session: WeeklyExamSession): Promise<boolean> {
@@ -125,6 +141,9 @@ function withTimeout<T>(promise: Promise<T>, ms = FIRESTORE_TIMEOUT_MS): Promise
     );
   });
 }
+
+/** Shorter budget when JSON/API already returned sessions — keep the weekly tab snappy. */
+const FIRESTORE_LIST_FAST_MS = 2500;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -286,7 +305,13 @@ function readLocal(): WeeklyExamSession[] {
 }
 
 function writeLocal(sessions: WeeklyExamSession[]): void {
-  localStorage.setItem(LOCAL_KEY, JSON.stringify(sessions));
+  try {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(sessions));
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.warn('[weeklyExam] localStorage write failed', err);
+    }
+  }
 }
 
 function saveLocalSession(session: WeeklyExamSession): void {
@@ -379,13 +404,16 @@ async function tryFirestoreListAll(): Promise<WeeklyExamSession[] | null> {
   }
 }
 
-async function tryFirestoreListPublished(weekKey: string): Promise<WeeklyExamSession[] | null> {
+async function tryFirestoreListPublished(
+  weekKey: string,
+  timeoutMs = FIRESTORE_TIMEOUT_MS,
+): Promise<WeeklyExamSession[] | null> {
   try {
     const q = query(
       collection(db, WEEKLY_EXAM_COLLECTION),
       where('status', '==', 'published'),
     );
-    const snap = await withTimeout(getDocs(q));
+    const snap = await withTimeout(getDocs(q), timeoutMs);
     const all = snap.docs.map((d) => normalizeSession(d.data() as Record<string, unknown>, d.id));
     return filterSessionsForStudentWeek(all, weekKey);
   } catch (err) {
@@ -455,13 +483,17 @@ export async function listPublishedForWeek(weekKey: string): Promise<WeeklyExamS
     readLocal().filter((s) => s.status === 'published'),
     weekKey,
   );
-  const [remote, jsonStore] = await Promise.all([
-    tryFirestoreListPublished(weekKey),
-    fetchJsonStore(false).then((list) => filterSessionsForStudentWeek(list, weekKey)),
-  ]);
+  // Resolve JSON/API first so the UI is not blocked on a slow/hung Firestore.
+  const jsonStore = filterSessionsForStudentWeek(await fetchJsonStore(false), weekKey);
   let merged = local;
   if (jsonStore.length) merged = mergeById(merged, jsonStore);
-  if (remote) merged = mergeById(merged, remote);
+
+  const remote = await tryFirestoreListPublished(
+    weekKey,
+    jsonStore.length || local.length ? FIRESTORE_LIST_FAST_MS : FIRESTORE_TIMEOUT_MS,
+  );
+  if (remote?.length) merged = mergeById(merged, remote);
+
   return merged.sort(
     (a, b) => a.day.localeCompare(b.day) || a.startsAt.localeCompare(b.startsAt),
   );
@@ -479,6 +511,18 @@ export async function getSessionById(id: string): Promise<WeeklyExamSession | nu
   } catch {
     /* fall through */
   }
+
+  try {
+    const fromStore = await fetchJsonStore(true);
+    const hit = fromStore.find((s) => s.id === id) ?? null;
+    if (hit) {
+      if (!localHit || hit.updatedAt >= localHit.updatedAt) return hit;
+      return localHit;
+    }
+  } catch {
+    /* fall through */
+  }
+
   return localHit;
 }
 

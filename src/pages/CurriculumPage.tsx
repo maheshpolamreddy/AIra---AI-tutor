@@ -122,49 +122,43 @@ export default function CurriculumPage() {
             <div className="min-h-screen min-h-[100dvh] flex flex-col relative overflow-hidden transition-colors duration-500">
                 {/* Enhanced Background elements */}
                 <div className="fixed inset-0 pointer-events-none overflow-hidden">
-                    <div className="absolute inset-0 bg-slate-50 dark:bg-slate-950 transition-colors duration-700" />
+                    <div className="absolute inset-0 bg-[var(--dash-bg,#eef2f7)] dark:bg-slate-950 transition-colors duration-700" />
 
-                    <div className="absolute inset-0 opacity-[0.8] dark:opacity-[0.5] transition-opacity duration-700">
-                        <div className="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] bg-[radial-gradient(circle,rgba(99,102,241,0.2)_0%,transparent_70%)] dark:bg-[radial-gradient(circle,rgba(99,102,241,0.1)_0%,transparent_70%)]" />
-                        <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-[radial-gradient(circle,rgba(168,85,247,0.2)_0%,transparent_70%)] dark:bg-[radial-gradient(circle,rgba(168,85,247,0.1)_0%,transparent_70%)]" />
-                        <div className="absolute top-[30%] right-[-20%] w-[50%] h-[50%] bg-[radial-gradient(circle,rgba(16,185,129,0.15)_0%,transparent_70%)] dark:bg-[radial-gradient(circle,rgba(16,185,129,0.08)_0%,transparent_70%)]" />
+                    <div className="absolute inset-0 opacity-[0.9] dark:opacity-[0.5] transition-opacity duration-700">
+                        <div className="absolute top-[-22%] left-[-14%] h-[70%] w-[70%] bg-[radial-gradient(circle,rgba(14,165,233,0.18)_0%,transparent_68%)]" />
+                        <div className="absolute bottom-[-26%] right-[-14%] h-[62%] w-[62%] bg-[radial-gradient(circle,rgba(13,148,136,0.16)_0%,transparent_70%)]" />
+                        <div className="absolute top-[28%] right-[-18%] h-[48%] w-[48%] bg-[radial-gradient(circle,rgba(217,119,6,0.12)_0%,transparent_70%)]" />
                     </div>
-
                     <div
-                        className="absolute top-[10%] right-[10%] w-[40%] h-[40%] bg-indigo-500/10 dark:bg-indigo-500/5 rounded-full blur-[120px] animate-pulse"
-                    />
-
-                    {/* Noise/Grain Texture for Depth */}
-                    <div className="absolute inset-0 opacity-[0.03] dark:opacity-[0.05] mix-blend-overlay"
+                        className="absolute inset-0 opacity-[0.035] dark:opacity-[0.05]"
                         style={{
-                            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
-                            backgroundRepeat: 'repeat',
-                            backgroundSize: '128px 128px'
+                            backgroundImage:
+                                'linear-gradient(rgba(15,23,42,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.045) 1px, transparent 1px)',
+                            backgroundSize: '48px 48px',
+                            maskImage: 'radial-gradient(ellipse at center, black 20%, transparent 75%)',
                         }}
                     />
                 </div>
 
                 {/* Header Area */}
-                <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200/50 dark:border-slate-800/50 sticky top-0 z-50 safe-top transition-colors duration-500">
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                        <div className="flex items-center justify-between h-16">
+                <header className="sticky top-0 z-50 border-b border-[var(--dash-border,rgba(15,23,42,0.08))] bg-white/85 backdrop-blur-xl transition-colors duration-500 safe-top dark:border-slate-800/50 dark:bg-slate-900/80">
+                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                        <div className="flex h-16 items-center justify-between">
                             {/* Left side */}
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-3 sm:gap-4">
                                 <button
                                     type="button"
                                     onClick={handleBack}
-                                    className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 
-                                             transition-colors"
+                                    className="rounded-xl p-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
                                     aria-label="Back"
                                 >
-                                    <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                                    <ArrowLeft className="h-5 w-5 text-slate-600 dark:text-slate-400" />
                                 </button>
 
-                                {/* Breadcrumbs */}
                                 <div className="flex items-center gap-3">
                                     <Link
                                         to={routes.dashboard}
-                                        className="font-bold text-lg bg-clip-text text-transparent bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-80 transition-all px-1"
+                                        className="px-1 font-[family-name:var(--dash-font-display,Sora,sans-serif)] text-lg font-bold tracking-tight text-slate-900 transition-opacity hover:opacity-80 dark:text-white"
                                     >
                                         Aɪra
                                     </Link>
@@ -182,12 +176,13 @@ export default function CurriculumPage() {
                                 <button
                                     type="button"
                                     onClick={() => setIsSearchOpen(true)}
-                                    className="p-2 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700
-                                             transition-colors flex items-center gap-2 group"
+                                    className="group flex items-center gap-2 rounded-xl bg-slate-100 px-2.5 py-2 transition-colors hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700"
                                     aria-label="Search curriculum"
                                 >
-                                    <Search className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors" />
-                                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors hidden sm:block pr-1">Search...</span>
+                                    <Search className="h-4 w-4 text-slate-500 transition-colors group-hover:text-teal-700 dark:text-slate-400 dark:group-hover:text-teal-300" />
+                                    <span className="hidden pr-1 text-sm font-medium text-slate-500 transition-colors group-hover:text-teal-700 sm:block dark:text-slate-400 dark:group-hover:text-teal-300">
+                                        Search...
+                                    </span>
                                 </button>
                             </div>
                         </div>
@@ -201,7 +196,7 @@ export default function CurriculumPage() {
                 />
 
                 {/* Main content */}
-                <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
+                <main className="relative z-10 mx-auto w-full max-w-7xl px-4 py-7 sm:px-6 sm:py-9 lg:px-8 lg:py-10">
                     <AnimatePresence mode="wait">
                         {currentView === 'grades' && (
                             <motion.div

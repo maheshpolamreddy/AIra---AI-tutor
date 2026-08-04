@@ -12,6 +12,7 @@ import { useCompetitiveStore } from '../../stores/competitiveStore';
 import { PremiumMetricCard, PremiumSelectionCard } from './CompetitiveCards';
 import type { WeeklyExamSession } from '../../types/weeklyExam';
 import { isSessionLive } from '../../services/weeklyExamSchedule';
+import { toast } from '../../stores/toastStore';
 import {
     clearExamDraft,
     findExam,
@@ -44,6 +45,15 @@ export default function ExamFlow({
     const [searchParams, setSearchParams] = useSearchParams();
     const recordAttempt = useCompetitiveStore((s) => s.recordAttempt);
     const weeklyAutoStartedRef = useRef(false);
+    const generationIdRef = useRef(0);
+    const isMountedRef = useRef(true);
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => {
+            isMountedRef.current = false;
+            generationIdRef.current += 1;
+        };
+    }, []);
     const paperFlow = flowType === 'pyq' || (flowType === 'weekly' && weeklySession?.mode === 'pyq');
     const mockFlow = flowType === 'mock' || (flowType === 'weekly' && weeklySession?.mode === 'mock');
 
@@ -140,6 +150,10 @@ export default function ExamFlow({
     const [elapsedSeconds, setElapsedSeconds] = useState(() => initialDraft?.elapsedSeconds ?? 0);
     const [isGenerating, setIsGenerating] = useState(false);
     const [reviewFilter, setReviewFilter] = useState<'all' | 'correct' | 'incorrect' | 'unattempted'>('all');
+    const timerRef = useRef(timer);
+    const elapsedRef = useRef(elapsedSeconds);
+    timerRef.current = timer;
+    elapsedRef.current = elapsedSeconds;
 
     // Hook to inform parent (CompetitiveDashboard) when we enter/exit exam mode
     useEffect(() => {
@@ -199,28 +213,32 @@ export default function ExamFlow({
         return () => clearInterval(interval);
     }, [step, goToStep]);
 
-    // Autosave draft progress while solving so a reload resumes the same paper
+    // Autosave draft while solving. Answer/bookmark changes save quickly;
+    // timer progress is included via refs and flushed on a 5s cadence.
     useEffect(() => {
         if (step !== 'solving' || !selectedExam || !selectedSubject || !questions.length) return;
-        saveExamDraft({
-            version: 2,
-            flowType,
-            examId: selectedExam.id,
-            subjectId: selectedSubject.id,
-            paperYear: selectedPaper ? String(selectedPaper.year) : undefined,
-            step: 'solving',
-            questions,
-            currentQuestionIndex,
-            userAnswers,
-            visitedQuestions,
-            markedForReview,
-            bookmarked,
-            eliminated,
-            notes,
-            timer,
-            elapsedSeconds,
-            savedAt: Date.now(),
-        });
+        const handle = window.setTimeout(() => {
+            saveExamDraft({
+                version: 2,
+                flowType,
+                examId: selectedExam.id,
+                subjectId: selectedSubject.id,
+                paperYear: selectedPaper ? String(selectedPaper.year) : undefined,
+                step: 'solving',
+                questions,
+                currentQuestionIndex,
+                userAnswers,
+                visitedQuestions,
+                markedForReview,
+                bookmarked,
+                eliminated,
+                notes,
+                timer: timerRef.current,
+                elapsedSeconds: elapsedRef.current,
+                savedAt: Date.now(),
+            });
+        }, 400);
+        return () => window.clearTimeout(handle);
     }, [
         step,
         flowType,
@@ -235,8 +253,46 @@ export default function ExamFlow({
         bookmarked,
         eliminated,
         notes,
-        timer,
-        elapsedSeconds,
+    ]);
+
+    useEffect(() => {
+        if (step !== 'solving' || !selectedExam || !selectedSubject || !questions.length) return;
+        const handle = window.setInterval(() => {
+            saveExamDraft({
+                version: 2,
+                flowType,
+                examId: selectedExam.id,
+                subjectId: selectedSubject.id,
+                paperYear: selectedPaper ? String(selectedPaper.year) : undefined,
+                step: 'solving',
+                questions,
+                currentQuestionIndex,
+                userAnswers,
+                visitedQuestions,
+                markedForReview,
+                bookmarked,
+                eliminated,
+                notes,
+                timer: timerRef.current,
+                elapsedSeconds: elapsedRef.current,
+                savedAt: Date.now(),
+            });
+        }, 5000);
+        return () => window.clearInterval(handle);
+    }, [
+        step,
+        flowType,
+        selectedExam,
+        selectedSubject,
+        selectedPaper,
+        questions,
+        currentQuestionIndex,
+        userAnswers,
+        visitedQuestions,
+        markedForReview,
+        bookmarked,
+        eliminated,
+        notes,
     ]);
 
     // Persist attempt once when results open
@@ -427,6 +483,7 @@ export default function ExamFlow({
                 return;
             }
         }
+        const generationId = ++generationIdRef.current;
         setIsGenerating(true);
         try {
             const year = resolveExamYear(exam, paperOverride !== undefined ? paperOverride : selectedPaper);
@@ -442,6 +499,7 @@ export default function ExamFlow({
                 examYear: year,
                 mode: paperFlow ? 'pyq' : 'mock',
             });
+            if (!isMountedRef.current || generationId !== generationIdRef.current) return;
             applyQuestionsAndStartSolving(
                 finalQuestions,
                 exam,
@@ -450,8 +508,14 @@ export default function ExamFlow({
             );
         } catch (error) {
             console.error('Failed to generate exam questions:', error);
+            if (isMountedRef.current && generationId === generationIdRef.current) {
+                weeklyAutoStartedRef.current = false;
+                toast.error('Could not generate the exam paper. Please try again.');
+            }
         } finally {
-            setIsGenerating(false);
+            if (isMountedRef.current && generationId === generationIdRef.current) {
+                setIsGenerating(false);
+            }
         }
     };
 

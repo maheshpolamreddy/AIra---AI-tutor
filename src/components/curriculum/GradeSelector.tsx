@@ -1,226 +1,252 @@
-import {
-    GraduationCap,
-    BookOpen,
-    Star,
-    ChevronRight
-} from 'lucide-react';
+import { useMemo } from 'react';
+import { motion } from 'framer-motion';
+import { ArrowUpRight, BookOpen, Compass, GraduationCap } from 'lucide-react';
 import { useCurriculumStore } from '../../stores/curriculumStore';
 import { schoolGrades } from '../../data/schoolCurriculum';
 import type { SchoolGrade, GradeLevel } from '../../types';
+import './curriculum.css';
 
 interface GradeSelectorProps {
-    onGradeSelect?: (gradeId: string) => void;
+  onGradeSelect?: (gradeId: string) => void;
 }
 
-const levelConfig: Record<GradeLevel, { label: string; color: string; bgColor: string; icon: React.ReactNode }> = {
-    'middle': {
-        label: 'Middle School',
-        color: '#2C8CFF',
-        bgColor: 'rgba(44, 140, 255, 0.1)',
-        icon: <BookOpen className="w-4 h-4" />
-    },
-    'secondary': {
-        label: 'Secondary',
-        color: '#8A4FFF',
-        bgColor: 'rgba(138, 79, 255, 0.1)',
-        icon: <Star className="w-4 h-4" />
-    },
-    'senior-secondary': {
-        label: 'Senior Secondary',
-        color: '#FF9E2C',
-        bgColor: 'rgba(255, 158, 44, 0.1)',
-        icon: <GraduationCap className="w-4 h-4" />
-    }
+const LEVEL_ORDER: GradeLevel[] = ['middle', 'secondary', 'senior-secondary'];
+
+const LEVEL_META: Record<
+  GradeLevel,
+  {
+    label: string;
+    accent: string;
+    blurb: string;
+    grid: '2' | '3';
+    step: string;
+    Icon: typeof BookOpen;
+  }
+> = {
+  middle: {
+    label: 'Middle School',
+    accent: '#0284c7',
+    blurb: 'Build strong foundations',
+    grid: '3',
+    step: '01',
+    Icon: BookOpen,
+  },
+  secondary: {
+    label: 'Secondary',
+    accent: '#0d9488',
+    blurb: 'Board-ready depth',
+    grid: '2',
+    step: '02',
+    Icon: Compass,
+  },
+  'senior-secondary': {
+    label: 'Senior Secondary',
+    accent: '#d97706',
+    blurb: 'Stream specialization',
+    grid: '2',
+    step: '03',
+    Icon: GraduationCap,
+  },
 };
 
-const GradeCard = ({ grade, onClick, progress }: { grade: SchoolGrade; onClick: () => void; progress: number }) => {
-    const config = levelConfig[grade.level];
+const PATH_STEPS = [
+  { label: 'Middle', tone: '#0284c7' },
+  { label: 'Secondary', tone: '#0d9488' },
+  { label: 'Senior', tone: '#d97706' },
+];
 
-    return (
-        <div 
-            onClick={onClick}
-            className="w-full bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden
-                       shadow-[0_4px_24px_rgba(0,0,0,0.07)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)]
-                       border border-slate-100/80 dark:border-slate-800
-                       transition-all duration-500 ease-[cubic-bezier(0.25,1,0.5,1)]
-                       hover:shadow-[0_16px_48px_rgba(0,0,0,0.13)] dark:hover:shadow-[0_16px_48px_rgba(0,0,0,0.6)]
-                       hover:-translate-y-2 group cursor-pointer flex flex-col h-full min-h-[310px] sm:min-h-[350px]"
-        >
-            {/* Inset Image Section - Natural, Vivid Colors */}
-            <div className="relative w-full h-[155px] sm:h-[190px] overflow-hidden shrink-0">
-                {grade.image ? (
-                    <img 
-                        src={grade.image} 
-                        alt={grade.name}
-                        className="w-full h-full object-cover object-center transform group-hover:scale-108 transition-transform duration-700 ease-out"
-                        style={{ filter: 'saturate(1.15) contrast(1.05)' }}
-                    />
-                ) : (
-                    <div 
-                        className="w-full h-full"
-                        style={{ background: `linear-gradient(135deg, ${config.color}, ${config.color}88)` }}
-                    />
-                )}
+function GradeCard({
+  grade,
+  accent,
+  progress,
+  index,
+  onSelect,
+}: {
+  grade: SchoolGrade;
+  accent: string;
+  progress: number;
+  index: number;
+  onSelect: () => void;
+}) {
+  return (
+    <motion.button
+      type="button"
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{
+        delay: Math.min(index * 0.05, 0.3),
+        duration: 0.45,
+        ease: [0.22, 1, 0.36, 1],
+      }}
+      onClick={onSelect}
+      className="grade-card"
+      style={{ ['--level-accent' as string]: accent }}
+      aria-label={`Select ${grade.name}`}
+    >
+      <div className="grade-card__media" aria-hidden>
+        {grade.image ? (
+          <img src={grade.image} alt="" loading="lazy" decoding="async" />
+        ) : null}
+        <span className="grade-card__media-fade" />
+        <span className="grade-card__watermark">{grade.gradeNumber}</span>
+      </div>
 
-                {/* Progress Badge */}
-                {progress > 0 && (
-                    <div 
-                        className="absolute top-3 right-3 px-3 py-1.5 rounded-xl border border-white/30 shadow-md flex items-center gap-1.5 backdrop-blur-sm"
-                        style={{ backgroundColor: `${config.color}dd` }}
-                    >
-                        <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                        <span className="text-[10px] font-black text-white tracking-wider uppercase">{progress}% Done</span>
-                    </div>
-                )}
+      <div className="grade-card__rail" aria-hidden />
 
-                {/* Grade Level Badge - Top Left */}
-                <div 
-                    className="absolute top-3 left-3 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest backdrop-blur-sm border border-white/30 shadow-sm text-white"
-                    style={{ backgroundColor: `${config.color}cc` }}
-                >
-                    {config.label}
-                </div>
-            </div>
-
-            {/* Vivid Accent Line */}
-            <div 
-                className="h-1 w-full shrink-0"
-                style={{ background: `linear-gradient(90deg, ${config.color}, ${config.color}55)` }}
-            />
-
-            {/* Content Section */}
-            <div className="flex-1 flex flex-col p-5 sm:p-6 relative">
-                {/* Subtle background glow */}
-                <div 
-                    className="absolute -top-8 -left-8 w-32 h-32 rounded-full opacity-[0.06] pointer-events-none blur-2xl"
-                    style={{ backgroundColor: config.color }}
-                />
-
-                {/* Title Row */}
-                <div className="flex items-center gap-3 mb-1.5">
-                    <div 
-                        className="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm shrink-0 transition-transform duration-300 group-hover:scale-110"
-                        style={{ 
-                            backgroundColor: `${config.color}18`,
-                            color: config.color,
-                            border: `1.5px solid ${config.color}30`
-                        }}
-                    >
-                        {config.icon}
-                    </div>
-                    <h3 className="text-xl sm:text-2xl font-extrabold text-slate-800 dark:text-white tracking-tight group-hover:translate-x-1 transition-transform duration-300 leading-tight">
-                        {grade.name}
-                    </h3>
-                </div>
-
-                {/* Subjects count */}
-                <p className="text-[13px] text-slate-400 dark:text-slate-500 font-semibold ml-12 mb-auto">
-                    {grade.subjects.length} Core Subjects
-                </p>
-
-                {/* Bottom Row */}
-                <div className="flex items-center justify-between mt-5 pt-4 border-t border-slate-100 dark:border-slate-800">
-                    <span 
-                        className="px-3.5 py-1.5 text-[10px] font-black rounded-full uppercase tracking-wider"
-                        style={{ 
-                            backgroundColor: `${config.color}14`,
-                            color: config.color,
-                            border: `1.5px solid ${config.color}25`
-                        }}
-                    >
-                        Ages {grade.ageGroup}
-                    </span>
-                    
-                    {/* Arrow Button */}
-                    <div className="relative w-9 h-9 rounded-full flex items-center justify-center overflow-hidden transition-all duration-300 group-hover:-rotate-45 group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)]">
-                        {/* Background circle - default slate */}
-                        <div className="absolute inset-0 bg-slate-100 dark:bg-slate-800 rounded-full transition-opacity duration-300 group-hover:opacity-0" />
-                        {/* Colored background on hover */}
-                        <div 
-                            className="absolute inset-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                            style={{ backgroundColor: config.color }}
-                        />
-                        <ChevronRight className="relative w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-white transition-colors duration-300 z-10" />
-                    </div>
-                </div>
-            </div>
+      <div className="grade-card__body">
+        <div className="grade-card__topline">
+          <div className="min-w-0">
+            <div className="grade-card__num">Class {grade.gradeNumber}</div>
+            <h3 className="grade-card__name">{grade.name}</h3>
+          </div>
         </div>
-    );
-};
+
+        <p className="grade-card__desc">{grade.description}</p>
+
+        <div className="grade-card__meta">
+          <span>
+            <strong>{grade.subjects.length}</strong> subjects
+          </span>
+          <span className="grade-card__meta-dot" aria-hidden />
+          <span>Ages {grade.ageGroup}</span>
+        </div>
+
+        {progress > 0 ? (
+          <div className="grade-card__progress" aria-label={`${progress}% complete`}>
+            <div className="grade-card__progress-row">
+              <span>Progress</span>
+              <span>{progress}%</span>
+            </div>
+            <div className="grade-card__track">
+              <i style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grade-card__footer">
+          <span className="grade-card__cta">Open pathway</span>
+          <span className="grade-card__go" aria-hidden>
+            <ArrowUpRight className="h-4 w-4" strokeWidth={2.4} />
+          </span>
+        </div>
+      </div>
+    </motion.button>
+  );
+}
 
 export default function GradeSelector({ onGradeSelect }: GradeSelectorProps) {
-    const { setSelectedGrade, getGradeProgress } = useCurriculumStore();
+  const { setSelectedGrade, getGradeProgress } = useCurriculumStore();
 
-    const handleGradeClick = (gradeId: string) => {
-        if (onGradeSelect) {
-            onGradeSelect(gradeId);
-        } else {
-            setSelectedGrade(gradeId);
-        }
-    };
-
-    // Group grades by level
-    const gradesByLevel = schoolGrades.reduce((acc, grade) => {
+  const gradesByLevel = useMemo(() => {
+    return schoolGrades.reduce(
+      (acc, grade) => {
         if (!acc[grade.level]) acc[grade.level] = [];
         acc[grade.level].push(grade);
         return acc;
-    }, {} as Record<GradeLevel, SchoolGrade[]>);
+      },
+      {} as Record<GradeLevel, SchoolGrade[]>,
+    );
+  }, []);
 
-    const levelOrder: GradeLevel[] = ['middle', 'secondary', 'senior-secondary'];
+  const handleGradeClick = (gradeId: string) => {
+    if (onGradeSelect) onGradeSelect(gradeId);
+    else setSelectedGrade(gradeId);
+  };
 
-    return (
-        <div className="space-y-12">
-            {/* Header */}
-            <div className="text-center max-w-2xl mx-auto">
-                <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white mb-4 tracking-tight">
-                    Select Your Class
-                </h1>
-                <p className="text-lg text-gray-600 dark:text-gray-400">
-                    Choose your grade level to access personalized learning materials and resources.
-                </p>
+  let stagger = 0;
+
+  return (
+    <div className="grade-select">
+      <motion.header
+        className="grade-select__hero"
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <div className="grade-select__hero-copy">
+          <p className="grade-select__eyebrow">
+            <Compass className="h-3.5 w-3.5" strokeWidth={2.4} />
+            Learning atlas
+          </p>
+          <h1 className="grade-select__title">
+            Select your
+            <span className="grade-select__title-accent"> class</span>
+          </h1>
+          <p className="grade-select__lede">
+            A structured path from middle school to senior secondary — pick your grade and step into
+            subjects built for how you learn.
+          </p>
+
+          <div className="grade-select__path" aria-hidden>
+            {PATH_STEPS.map((step, i) => (
+              <div key={step.label} className="grade-select__path-item">
+                <span className="grade-select__path-dot" style={{ background: step.tone }} />
+                <span className="grade-select__path-label">{step.label}</span>
+                {i < PATH_STEPS.length - 1 ? <span className="grade-select__path-line" /> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="grade-select__hero-panel" aria-hidden>
+          <div className="grade-select__hero-orb grade-select__hero-orb--a" />
+          <div className="grade-select__hero-orb grade-select__hero-orb--b" />
+          <div className="grade-select__hero-grid" />
+          <p className="grade-select__hero-kicker">Classes</p>
+          <p className="grade-select__hero-range">6 – 12</p>
+          <p className="grade-select__hero-note">Seven pathways · CBSE-aligned depth</p>
+        </div>
+      </motion.header>
+
+      {LEVEL_ORDER.map((level) => {
+        const grades = gradesByLevel[level];
+        if (!grades?.length) return null;
+        const meta = LEVEL_META[level];
+        const Icon = meta.Icon;
+
+        return (
+          <section
+            key={level}
+            className="grade-select__band"
+            style={{ ['--level-accent' as string]: meta.accent }}
+            aria-labelledby={`grade-band-${level}`}
+          >
+            <div className="grade-select__band-head">
+              <div className="grade-select__band-label">
+                <span className="grade-select__band-step">{meta.step}</span>
+                <span className="grade-select__band-icon" aria-hidden>
+                  <Icon className="h-4 w-4" strokeWidth={2.2} />
+                </span>
+                <div>
+                  <h2 id={`grade-band-${level}`} className="grade-select__band-title">
+                    {meta.label}
+                  </h2>
+                  <p className="grade-select__band-sub">{meta.blurb}</p>
+                </div>
+              </div>
+              <span className="grade-select__band-count">
+                {grades.length} {grades.length === 1 ? 'class' : 'classes'}
+              </span>
             </div>
 
-            {/* Grades by level */}
-            {levelOrder.map((level) => {
-                const grades = gradesByLevel[level];
-                if (!grades || grades.length === 0) return null;
-
-                const config = levelConfig[level];
-
+            <div className={`grade-select__grid grade-select__grid--${meta.grid}`}>
+              {grades.map((grade) => {
+                const index = stagger++;
                 return (
-                    <div key={level} className="space-y-6">
-                        <div className="flex items-center gap-4">
-                            <div
-                                className="p-2.5 rounded-xl shadow-sm"
-                                style={{ backgroundColor: config.bgColor }}
-                            >
-                                <span style={{ color: config.color }}>{config.icon}</span>
-                            </div>
-                            <div>
-                                <h2 className="text-xl font-bold text-gray-800 dark:text-gray-200">
-                                    {config.label}
-                                </h2>
-                                <p className="text-xs text-gray-400 dark:text-gray-500 font-medium">
-                                    {grades.length} {grades.length === 1 ? 'Grade' : 'Grades'} available
-                                </p>
-                            </div>
-                            <div className="flex-1 h-px bg-gradient-to-r from-gray-200 dark:from-gray-700 to-transparent" />
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 lg:gap-8">
-                            {grades.map((grade) => (
-                                <div key={grade.id} className="h-full w-full">
-                                    <GradeCard
-                                        grade={grade}
-                                        onClick={() => handleGradeClick(grade.id)}
-                                        progress={getGradeProgress(grade.id)}
-                                    />
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+                  <GradeCard
+                    key={grade.id}
+                    grade={grade}
+                    accent={meta.accent}
+                    progress={getGradeProgress(grade.id)}
+                    index={index}
+                    onSelect={() => handleGradeClick(grade.id)}
+                  />
                 );
-            })}
-        </div>
-    );
+              })}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
 }

@@ -38,12 +38,12 @@ export default function CompetitiveDashboard() {
 
     // The active section lives in the URL so refresh, deep links and the browser
     // back button all resolve to the screen the student was actually on.
-    const activeSection = normalizeSection(searchParams.get(SECTION_PARAM));
+    const rawSection = searchParams.get(SECTION_PARAM);
+    const activeSection = normalizeSection(rawSection);
 
     // Normalise an unknown or missing `section` without adding a history entry.
     useEffect(() => {
-        const raw = searchParams.get(SECTION_PARAM);
-        if (raw === activeSection) return;
+        if (rawSection === activeSection) return;
         setSearchParams(
             (prev) => {
                 const next = new URLSearchParams(prev);
@@ -52,7 +52,7 @@ export default function CompetitiveDashboard() {
             },
             { replace: true },
         );
-    }, [activeSection, searchParams, setSearchParams]);
+    }, [activeSection, rawSection, setSearchParams]);
 
     const selectSection = useCallback(
         (sectionId: (typeof SIDEBAR_ITEMS)[number]['id']) => {

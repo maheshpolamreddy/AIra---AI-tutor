@@ -188,6 +188,7 @@ export default function WeeklyTestsFlow({ onExamStateChange }: WeeklyTestsFlowPr
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [keepExamOpen, setKeepExamOpen] = useState(false);
 
   const weekKey = useMemo(() => getIsoWeekKeyIst(), []);
   const rawChallenge = searchParams.get('weeklySession') || searchParams.get('challenge');
@@ -202,27 +203,35 @@ export default function WeeklyTestsFlow({ onExamStateChange }: WeeklyTestsFlowPr
 
   const weeklySessionId = activeSession?.id ?? null;
 
-  const refresh = useCallback(async () => {
+  useEffect(() => {
+    let alive = true;
     setLoading(true);
     setError(null);
-    try {
-      const list = await listPublishedForWeek(weekKey);
-      setSessions(dedupeWeekendSessions(list));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load weekly exams');
-    } finally {
-      setLoading(false);
-    }
+    void listPublishedForWeek(weekKey)
+      .then((list) => {
+        if (!alive) return;
+        setSessions(dedupeWeekendSessions(list));
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setError(e instanceof Error ? e.message : 'Could not load weekly exams');
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, [weekKey]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (!weeklySessionId) setKeepExamOpen(false);
+  }, [weeklySessionId]);
 
   const launchSession = useCallback(
     (session: WeeklyExamSession) => {
@@ -254,11 +263,18 @@ export default function WeeklyTestsFlow({ onExamStateChange }: WeeklyTestsFlowPr
   const saturday = sessions.find((s) => s.day === 'saturday') ?? null;
   const sunday = sessions.find((s) => s.day === 'sunday') ?? null;
 
-  if (weeklySessionId && activeSession && getSessionWindowState(activeSession, new Date(nowTick)) === 'live') {
+  // Once launched, keep ExamFlow mounted even if the IST window ends mid-attempt.
+  // Launch itself remains gated to live in launchSession / ExamFlow.
+  const sessionLive =
+    !!activeSession && getSessionWindowState(activeSession, new Date(nowTick)) === 'live';
+  if (weeklySessionId && activeSession && (sessionLive || keepExamOpen)) {
     return (
       <ExamFlow
         isDashboardView
-        onExamStateChange={onExamStateChange}
+        onExamStateChange={(active) => {
+          if (active) setKeepExamOpen(true);
+          onExamStateChange?.(active);
+        }}
         flowType="weekly"
         weeklySession={activeSession}
       />

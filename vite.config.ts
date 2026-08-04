@@ -9,8 +9,9 @@ import type { ProxyOptions } from 'vite'
  *
  * Never point this at :8787 (legacy vercel-dev port) unless that process is running.
  */
+// Prefer IPv4 — on Windows `localhost` can resolve to ::1 while Next binds 127.0.0.1.
 const API_PROXY_TARGET =
-  process.env.VITE_API_PROXY_TARGET || 'http://localhost:3000'
+  process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3000'
 
 const apiProxy: ProxyOptions = {
   target: API_PROXY_TARGET,
