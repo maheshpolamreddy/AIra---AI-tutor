@@ -29,6 +29,78 @@ const FIRESTORE_TIMEOUT_MS = 8000;
 /** Must match firestore.rules weeklyBridgeOk() — lets demo admins publish to production. */
 const WEEKLY_BRIDGE_SECRET = 'aira_weekly_bridge_v1';
 
+function apiBase(): string {
+  // Prefer same-origin (landing rewrite / vite proxy). Fall back to configured landing.
+  const configured = (import.meta.env.VITE_LANDING_ORIGIN as string | undefined)?.replace(/\/$/, '');
+  if (typeof window !== 'undefined') {
+    const { port, hostname } = window.location;
+    // Tutor standalone ports talk to landing for the shared schedule API
+    if ((port === '5173' || port === '4173') && configured) return configured;
+    if (hostname.includes('ai-ra-app') && configured) return configured;
+  }
+  return configured || '';
+}
+
+async function fetchJsonStore(all = false): Promise<WeeklyExamSession[]> {
+  const bases = [
+    apiBase(),
+    typeof window !== 'undefined' ? window.location.origin : '',
+    '',
+  ].filter((v, i, a) => a.indexOf(v) === i);
+
+  for (const base of bases) {
+    try {
+      const url = `${base}/api/weekly-exams${all ? '?all=1' : ''}`;
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (!res.ok) continue;
+      const data = (await res.json()) as { sessions?: WeeklyExamSession[] };
+      if (Array.isArray(data.sessions)) {
+        return data.sessions.map((s) => normalizeSession(s as unknown as Record<string, unknown>, s.id));
+      }
+    } catch {
+      /* try next */
+    }
+  }
+
+  // Static seed shipped with the tutor build (works even if API is cold)
+  try {
+    const res = await fetch('/weekly-exam-schedules.json', { cache: 'no-store' });
+    if (res.ok) {
+      const data = (await res.json()) as WeeklyExamSession[];
+      if (Array.isArray(data)) {
+        const list = data.map((s) => normalizeSession(s as unknown as Record<string, unknown>, s.id));
+        return all ? list : list.filter((s) => s.status === 'published');
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+async function postJsonStore(session: WeeklyExamSession): Promise<boolean> {
+  const bases = [
+    apiBase(),
+    typeof window !== 'undefined' ? window.location.origin : '',
+    '',
+  ].filter((v, i, a) => a.indexOf(v) === i);
+
+  for (const base of bases) {
+    try {
+      const res = await fetch(`${base}/api/weekly-exams`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ ...toFirestorePayload(session), bridgeSecret: WEEKLY_BRIDGE_SECRET }),
+      });
+      if (res.ok) return true;
+    } catch {
+      /* try next */
+    }
+  }
+  return false;
+}
+
 function assertAdmin(): void {
   const { role } = useAuthStore.getState();
   if (role !== 'admin') {
@@ -371,9 +443,11 @@ function mergeById(
 export async function listAllForAdmin(): Promise<WeeklyExamSession[]> {
   assertAdmin();
   const local = readLocal();
-  const remote = await tryFirestoreListAll();
-  if (!remote) return sortByUpdatedDesc(local);
-  return sortByUpdatedDesc(mergeById(local, remote));
+  const [remote, jsonStore] = await Promise.all([tryFirestoreListAll(), fetchJsonStore(true)]);
+  let merged = local;
+  if (jsonStore.length) merged = mergeById(merged, jsonStore);
+  if (remote) merged = mergeById(merged, remote);
+  return sortByUpdatedDesc(merged);
 }
 
 export async function listPublishedForWeek(weekKey: string): Promise<WeeklyExamSession[]> {
@@ -381,11 +455,14 @@ export async function listPublishedForWeek(weekKey: string): Promise<WeeklyExamS
     readLocal().filter((s) => s.status === 'published'),
     weekKey,
   );
-  const remote = await tryFirestoreListPublished(weekKey);
-  if (!remote) {
-    return local.sort((a, b) => a.day.localeCompare(b.day) || a.startsAt.localeCompare(b.startsAt));
-  }
-  return mergeById(local, remote).sort(
+  const [remote, jsonStore] = await Promise.all([
+    tryFirestoreListPublished(weekKey),
+    fetchJsonStore(false).then((list) => filterSessionsForStudentWeek(list, weekKey)),
+  ]);
+  let merged = local;
+  if (jsonStore.length) merged = mergeById(merged, jsonStore);
+  if (remote) merged = mergeById(merged, remote);
+  return merged.sort(
     (a, b) => a.day.localeCompare(b.day) || a.startsAt.localeCompare(b.startsAt),
   );
 }
@@ -445,10 +522,10 @@ export async function upsertSession(input: WeeklyExamSessionInput): Promise<Week
   };
 
   saveLocalSession(session);
-  const remoteOk = await tryFirestoreWrite(session);
-  if (!remoteOk && session.status === 'published') {
+  const [remoteOk, apiOk] = await Promise.all([tryFirestoreWrite(session), postJsonStore(session)]);
+  if (!remoteOk && !apiOk && session.status === 'published') {
     throw new Error(
-      'Saved on this device, but cloud sync failed. Deploy Firestore rules, then click Update/Publish again so students on the live site can see this exam.',
+      'Saved on this device, but cloud sync failed. Check your connection and click Update/Publish again so students on the live site can see this exam.',
     );
   }
   return session;
