@@ -167,7 +167,7 @@ export default function CompetitiveDashboard() {
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -8 }}
                         transition={{ duration: 0.28 }}
-                        className="min-h-full"
+                        className="min-h-full w-full max-w-none"
                     >
                         {activeSection === 'exams' && (
                             <ExamFlow onExamStateChange={setIsExamActive} isDashboardView flowType="standard" />
