@@ -30,17 +30,13 @@ const FIRESTORE_TIMEOUT_MS = 8000;
 const WEEKLY_BRIDGE_SECRET = 'aira_weekly_bridge_v1';
 
 function apiBase(): string {
-  // Prefer same-origin (landing rewrite / vite proxy). Fall back to configured landing.
+  // Prefer same-origin (landing rewrite / vite /api proxy) so local lists don't wait on a dead cross-origin host.
   const configured = (import.meta.env.VITE_LANDING_ORIGIN as string | undefined)?.replace(/\/$/, '');
   if (typeof window !== 'undefined') {
-    const { port, hostname } = window.location;
+    const { hostname } = window.location;
     const isLocal =
       hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
-    // When opened via landing (:3000) or any local host, always use same-origin /api.
-    if (isLocal && port !== '5173' && port !== '4173') return '';
-    // Tutor standalone ports talk to landing for the shared schedule API
-    if ((port === '5173' || port === '4173') && configured) return configured;
-    if ((port === '5173' || port === '4173') && !configured) return 'http://127.0.0.1:3000';
+    if (isLocal) return '';
     if (hostname.includes('ai-ra-app') && configured) return configured;
   }
   return configured || '';
@@ -409,11 +405,22 @@ async function tryFirestoreListPublished(
   timeoutMs = FIRESTORE_TIMEOUT_MS,
 ): Promise<WeeklyExamSession[] | null> {
   try {
-    const q = query(
-      collection(db, WEEKLY_EXAM_COLLECTION),
-      where('status', '==', 'published'),
-    );
-    const snap = await withTimeout(getDocs(q), timeoutMs);
+    // Prefer week-scoped query; fall back if composite index is missing.
+    let snap;
+    try {
+      const scoped = query(
+        collection(db, WEEKLY_EXAM_COLLECTION),
+        where('status', '==', 'published'),
+        where('weekKey', '==', weekKey),
+      );
+      snap = await withTimeout(getDocs(scoped), timeoutMs);
+    } catch {
+      const broad = query(
+        collection(db, WEEKLY_EXAM_COLLECTION),
+        where('status', '==', 'published'),
+      );
+      snap = await withTimeout(getDocs(broad), timeoutMs);
+    }
     const all = snap.docs.map((d) => normalizeSession(d.data() as Record<string, unknown>, d.id));
     return filterSessionsForStudentWeek(all, weekKey);
   } catch (err) {

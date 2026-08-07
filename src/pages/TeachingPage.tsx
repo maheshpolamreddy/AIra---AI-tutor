@@ -147,7 +147,27 @@ export default function TeachingPage() {
     })));
 
     const { addSession } = useAnalyticsStore();
-    const [sessionStartTime] = useState<number>(Date.now());
+    const sessionStartTimeRef = useRef<number>(Date.now());
+    const activeTopicForAnalyticsRef = useRef(topicId);
+
+    // Reset per-topic session clock when the student switches topics without leaving the page.
+    useEffect(() => {
+        if (activeTopicForAnalyticsRef.current === topicId) return;
+        const prevTopic = activeTopicForAnalyticsRef.current;
+        const duration = Math.max(0, Math.round((Date.now() - sessionStartTimeRef.current) / 60000));
+        if (prevTopic && duration >= 1) {
+            useAnalyticsStore.getState().addSession({
+                sessionId: `session_switch_${Date.now()}`,
+                date: new Date().toISOString(),
+                durationMinutes: duration,
+                topicId: prevTopic,
+                completionPercentage: Math.round(useTeachingStore.getState().getProgress()) || 0,
+                doubtsCount: useTeachingStore.getState().currentSession?.doubts?.length || 0,
+            });
+        }
+        activeTopicForAnalyticsRef.current = topicId;
+        sessionStartTimeRef.current = Date.now();
+    }, [topicId]);
 
     const { settings } = useSettingsStore(useShallow(state => ({ settings: state.settings })));
     const reduceAnimations = settings?.accessibility?.reduceAnimations ?? false;
@@ -696,13 +716,13 @@ export default function TeachingPage() {
             timeoutRefs.current = [];
 
             // Log flight time when leaving the teaching page
-            const duration = Math.max(1, Math.round((Date.now() - sessionStartTime) / 60000));
+            const duration = Math.max(1, Math.round((Date.now() - sessionStartTimeRef.current) / 60000));
             if (duration >= 1) { // Only log if they spent at least a minute
                 useAnalyticsStore.getState().addSession({
                     sessionId: `session_exit_${Date.now()}`,
                     date: new Date().toISOString(),
                     durationMinutes: duration,
-                    topicId: topicId || 'unknown',
+                    topicId: activeTopicForAnalyticsRef.current || topicId || 'unknown',
                     completionPercentage: Math.round(useTeachingStore.getState().getProgress()) || 0,
                     doubtsCount: useTeachingStore.getState().currentSession?.doubts?.length || 0,
                     // No quizScore: leaving the page is not a quiz attempt, and a placeholder 0
@@ -710,7 +730,7 @@ export default function TeachingPage() {
                 });
             }
         };
-    }, [topicId, sessionStartTime]);
+    }, [topicId]);
 
     // Visual Sync Engine: bridge from AI narration markers to green board state
     useEffect(() => {
@@ -2005,7 +2025,7 @@ export default function TeachingPage() {
                                                                                         addSession({
                                                                                             sessionId: `session_${Date.now()}`,
                                                                                             date: new Date().toISOString(),
-                                                                                            durationMinutes: Math.max(1, Math.round((Date.now() - sessionStartTime) / 60000)),
+                                                                                            durationMinutes: Math.max(1, Math.round((Date.now() - sessionStartTimeRef.current) / 60000)),
                                                                                             topicId: topicId || 'unknown',
                                                                                             completionPercentage: 100,
                                                                                             doubtsCount: currentSession?.doubts?.length || 0,
@@ -2214,7 +2234,7 @@ export default function TeachingPage() {
                                                                     addSession({
                                                                         sessionId: `studio_quiz_${Date.now()}`,
                                                                         date: new Date().toISOString(),
-                                                                        durationMinutes: Math.max(1, Math.round((Date.now() - sessionStartTime) / 60000)),
+                                                                        durationMinutes: Math.max(1, Math.round((Date.now() - sessionStartTimeRef.current) / 60000)),
                                                                         topicId: topicId || 'unknown',
                                                                         completionPercentage: 100,
                                                                         doubtsCount: currentSession?.doubts?.length || 0,
@@ -2296,7 +2316,7 @@ export default function TeachingPage() {
                                 addSession({
                                     sessionId: `vquiz_${Date.now()}`,
                                     date: new Date().toISOString(),
-                                    durationMinutes: Math.max(1, Math.round((Date.now() - sessionStartTime) / 60000)),
+                                    durationMinutes: Math.max(1, Math.round((Date.now() - sessionStartTimeRef.current) / 60000)),
                                     topicId: topicId || 'unknown',
                                     completionPercentage: 100,
                                     doubtsCount: currentSession?.doubts?.length || 0,

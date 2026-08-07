@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, BookOpen, GraduationCap, ArrowRight, Layers } from 'lucide-react';
 import { schoolGrades } from '../../data/schoolCurriculum';
+import { studentRoutes } from '../../utils/routes';
 import type { SchoolGrade, SchoolSubject, Chapter, Topic } from '../../types';
 
 interface CurriculumSearchProps {
@@ -26,14 +27,18 @@ type SearchResultItem = {
 export default function CurriculumSearch({ isOpen, onClose }: CurriculumSearchProps) {
     const [query, setQuery] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
+    const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [, setSearchParams] = useSearchParams();
+    const navigate = useNavigate();
 
     // Focus input on open
     useEffect(() => {
         if (isOpen && inputRef.current) {
-            // slight delay string to ensure the animation fires before focusing
-            setTimeout(() => inputRef.current?.focus(), 50);
+            focusTimerRef.current = setTimeout(() => inputRef.current?.focus(), 50);
         }
+        return () => {
+            if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+        };
     }, [isOpen]);
 
     // Handle Escape key to close
@@ -126,6 +131,14 @@ export default function CurriculumSearch({ isOpen, onClose }: CurriculumSearchPr
 
     // Handle Selection Routing
     const handleSelectResult = (result: SearchResultItem) => {
+        if (result.type === 'topic' && result.topicId) {
+            const params = new URLSearchParams({ grade: result.gradeId });
+            if (result.subjectId) params.set('subject', result.subjectId);
+            navigate(`${studentRoutes.learn(result.topicId)}?${params.toString()}`);
+            onClose();
+            setQuery('');
+            return;
+        }
         const params: Record<string, string> = { grade: result.gradeId };
         if (result.subjectId) {
             params.subject = result.subjectId;

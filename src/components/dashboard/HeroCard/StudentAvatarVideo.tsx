@@ -115,9 +115,17 @@ export default function StudentAvatarVideo({ className = '' }: StudentAvatarVide
 
     let raf = 0;
     let running = true;
+    let lastPaint = 0;
+    // Cap chroma-key work — full-res getImageData every frame tanks the dashboard main thread.
+    const MIN_FRAME_MS = 1000 / 18;
 
-    const paint = () => {
+    const paint = (now = performance.now()) => {
       if (!running) return;
+      raf = requestAnimationFrame(paint);
+      if (document.hidden) return;
+      if (now - lastPaint < MIN_FRAME_MS) return;
+      lastPaint = now;
+      if (video.paused || video.ended) return;
       const vw = video.videoWidth || 420;
       const vh = video.videoHeight || 546;
       if (vw > 0 && vh > 0) {
@@ -148,7 +156,6 @@ export default function StudentAvatarVideo({ className = '' }: StudentAvatarVide
         }
         ctx.putImageData(frame, 0, 0);
       }
-      raf = requestAnimationFrame(paint);
     };
 
     const start = () => {

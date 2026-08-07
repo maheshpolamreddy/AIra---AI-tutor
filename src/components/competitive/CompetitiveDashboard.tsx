@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -14,12 +14,21 @@ import {
     BrainCircuit,
     Sparkles,
 } from 'lucide-react';
-import ExamFlow from './ExamFlow';
-import TopicQuizzesFlow from './TopicQuizzesFlow';
-import QuestionaryExplanationFlow from './QuestionaryExplanationFlow';
-import PerformanceAnalytics from './PerformanceAnalytics';
-import WeeklyTestsFlow from './WeeklyTestsFlow';
 import { FLOW_PARAMS, SECTION_PARAM, normalizeSection } from '../../lib/competitiveRoute';
+
+const ExamFlow = lazy(() => import('./ExamFlow'));
+const TopicQuizzesFlow = lazy(() => import('./TopicQuizzesFlow'));
+const QuestionaryExplanationFlow = lazy(() => import('./QuestionaryExplanationFlow'));
+const PerformanceAnalytics = lazy(() => import('./PerformanceAnalytics'));
+const WeeklyTestsFlow = lazy(() => import('./WeeklyTestsFlow'));
+
+function SectionFallback() {
+    return (
+        <div className="flex min-h-[240px] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+            Loading…
+        </div>
+    );
+}
 
 const SIDEBAR_ITEMS = [
     { id: 'exams', label: 'Available Exams', icon: LayoutDashboard, hint: 'Catalog' },
@@ -54,6 +63,16 @@ export default function CompetitiveDashboard() {
         );
     }, [activeSection, rawSection, setSearchParams]);
 
+    // Lock body scroll while the mobile sheet is open.
+    useEffect(() => {
+        if (!isMobileMenuOpen) return;
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = prev;
+        };
+    }, [isMobileMenuOpen]);
+
     const selectSection = useCallback(
         (sectionId: (typeof SIDEBAR_ITEMS)[number]['id']) => {
             setIsMobileMenuOpen(false);
@@ -72,43 +91,148 @@ export default function CompetitiveDashboard() {
     const active = SIDEBAR_ITEMS.find((i) => i.id === activeSection) || SIDEBAR_ITEMS[0];
     const ActiveIcon = active.icon;
 
+    const renderNav = (mobile: boolean) => (
+        <nav className={mobile ? 'space-y-2' : 'space-y-1.5'}>
+            {SIDEBAR_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeSection === item.id;
+                return (
+                    <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => selectSection(item.id)}
+                        className={`group relative flex w-full items-center gap-3 overflow-hidden rounded-2xl px-3.5 transition-all ${
+                            mobile ? 'min-h-[52px] py-3' : 'py-3.5'
+                        } ${
+                            isActive
+                                ? 'bg-orange-50 font-bold text-orange-900 shadow-sm ring-1 ring-orange-200/80 dark:bg-orange-500/15 dark:text-orange-100 dark:ring-orange-500/30'
+                                : mobile
+                                  ? 'bg-white font-semibold text-slate-900 ring-1 ring-slate-200/90 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700'
+                                  : 'font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/70'
+                        }`}
+                    >
+                        {isActive && (
+                            <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-orange-500" />
+                        )}
+                        <span
+                            className={`relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition ${
+                                isActive
+                                    ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
+                                    : 'bg-slate-100 text-slate-700 group-hover:text-orange-600 dark:bg-slate-800 dark:text-slate-200'
+                            }`}
+                        >
+                            <Icon className="h-4.5 w-4.5 h-[18px] w-[18px]" />
+                        </span>
+                        <span className="relative z-10 flex min-w-0 flex-1 flex-col text-left">
+                            <span className={`truncate tracking-wide ${mobile ? 'text-[15px]' : 'text-sm'}`}>
+                                {item.label}
+                            </span>
+                            {mobile && (
+                                <span
+                                    className={`text-[10px] font-bold uppercase tracking-[0.14em] ${
+                                        isActive ? 'text-orange-600/80 dark:text-orange-300/80' : 'text-slate-500 dark:text-slate-400'
+                                    }`}
+                                >
+                                    {item.hint}
+                                </span>
+                            )}
+                        </span>
+                        <ChevronRight
+                            className={`relative z-10 h-4 w-4 shrink-0 ${
+                                isActive ? 'text-orange-500 opacity-80' : 'text-slate-400 opacity-70'
+                            }`}
+                        />
+                    </button>
+                );
+            })}
+        </nav>
+    );
+
     return (
-        <div className="mx-auto flex h-full w-full max-w-[1440px] flex-col gap-5 overflow-hidden px-3 py-4 sm:gap-6 sm:px-5 lg:flex-row lg:px-8 lg:py-6">
-            {/* Mobile section switcher */}
+        <div className="relative mx-auto flex h-full w-full max-w-[1440px] flex-col gap-4 overflow-hidden px-3 py-3 sm:gap-6 sm:px-5 sm:py-4 lg:flex-row lg:px-8 lg:py-6">
+            {/* Mobile section switcher — solid, high-contrast (no glass bleed) */}
             <div
-                className={`flex items-center justify-between rounded-2xl border border-[var(--comp-border)] bg-[var(--comp-elevated)]/90 p-3.5 shadow-sm backdrop-blur-xl lg:hidden ${
+                className={`flex items-center justify-between rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:hidden ${
                     isExamActive ? 'hidden' : ''
                 }`}
             >
-                <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400">
+                <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-white shadow-sm shadow-orange-500/25">
                         <ActiveIcon className="h-5 w-5" />
                     </div>
-                    <div>
-                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+                    <div className="min-w-0">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-orange-600 dark:text-orange-400">
                             {active.hint}
                         </div>
-                        <div className="text-sm font-black text-slate-900 dark:text-white">{active.label}</div>
+                        <div className="truncate text-sm font-black text-slate-900 dark:text-white">
+                            {active.label}
+                        </div>
                     </div>
                 </div>
                 <button
                     type="button"
                     onClick={() => setIsMobileMenuOpen((v) => !v)}
-                    className="rounded-xl bg-slate-100 p-2.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                    aria-label="Toggle navigation"
+                    className="rounded-xl bg-slate-900 p-2.5 text-white shadow-sm dark:bg-orange-500"
+                    aria-label={isMobileMenuOpen ? 'Close navigation' : 'Open navigation'}
+                    aria-expanded={isMobileMenuOpen}
                 >
                     {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
                 </button>
             </div>
 
-            {/* Sidebar */}
+            {/* Mobile dimmed scrim */}
+            <AnimatePresence>
+                {isMobileMenuOpen && !isExamActive && (
+                    <motion.button
+                        type="button"
+                        aria-label="Close navigation"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="fixed inset-0 z-40 bg-slate-950/55 backdrop-blur-[2px] lg:hidden"
+                        onClick={() => setIsMobileMenuOpen(false)}
+                    />
+                )}
+            </AnimatePresence>
+
+            {/* Mobile navigation sheet — opaque white so labels stay readable */}
+            <AnimatePresence>
+                {isMobileMenuOpen && !isExamActive && (
+                    <motion.aside
+                        initial={{ opacity: 0, y: 16 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 12 }}
+                        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                        className="fixed inset-x-3 top-[7.25rem] z-50 flex max-h-[min(78dvh,640px)] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/25 dark:border-slate-700 dark:bg-slate-950 lg:hidden"
+                    >
+                        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className="h-4 w-4 text-orange-500" />
+                                <span className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-800 dark:text-slate-100">
+                                    Competitive hub
+                                </span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsMobileMenuOpen(false)}
+                                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                aria-label="Close"
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">{renderNav(true)}</div>
+                    </motion.aside>
+                )}
+            </AnimatePresence>
+
+            {/* Desktop sidebar */}
             <aside
                 className={`
-                absolute inset-x-3 top-[4.5rem] z-40 flex max-h-[calc(100dvh-6rem)] flex-col overflow-hidden rounded-3xl
-                border border-[var(--comp-border)] bg-[var(--comp-elevated)]/95 shadow-2xl shadow-slate-900/10 backdrop-blur-2xl
-                transition-all duration-400 lg:relative lg:inset-auto lg:top-0 lg:z-auto lg:max-h-none
-                lg:w-[280px] lg:shrink-0 xl:w-[300px]
-                ${isMobileMenuOpen ? 'translate-y-0 opacity-100' : 'pointer-events-none -translate-y-4 opacity-0 lg:pointer-events-auto lg:translate-y-0 lg:opacity-100'}
+                relative z-auto hidden max-h-none w-[280px] shrink-0 flex-col overflow-hidden rounded-3xl
+                border border-[var(--comp-border)] bg-[var(--comp-elevated)] shadow-[var(--comp-shadow)]
+                lg:flex xl:w-[300px]
                 ${isExamActive ? '!hidden' : ''}
             `}
             >
@@ -116,45 +240,11 @@ export default function CompetitiveDashboard() {
                     <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-orange-500/10 blur-3xl" />
                     <div className="mb-5 flex items-center gap-2 px-2">
                         <Sparkles className="h-4 w-4 text-orange-500" />
-                        <span className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
+                        <span className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
                             Competitive hub
                         </span>
                     </div>
-                    <nav className="space-y-1.5">
-                        {SIDEBAR_ITEMS.map((item) => {
-                            const Icon = item.icon;
-                            const isActive = activeSection === item.id;
-                            return (
-                                <button
-                                    key={item.id}
-                                    type="button"
-                                    onClick={() => selectSection(item.id)}
-                                    className={`group relative flex w-full items-center gap-3 overflow-hidden rounded-2xl px-3.5 py-3.5 transition-all ${
-                                        isActive
-                                            ? 'bg-gradient-to-r from-orange-500/15 via-amber-500/10 to-transparent font-bold text-orange-800 shadow-sm dark:text-orange-200'
-                                            : 'text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800/70'
-                                    }`}
-                                >
-                                    {isActive && (
-                                        <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-orange-500" />
-                                    )}
-                                    <span
-                                        className={`relative z-10 flex h-9 w-9 items-center justify-center rounded-xl transition ${
-                                            isActive
-                                                ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
-                                                : 'bg-slate-100 text-slate-500 group-hover:text-orange-600 dark:bg-slate-800'
-                                        }`}
-                                    >
-                                        <Icon className="h-4 w-4" />
-                                    </span>
-                                    <span className="relative z-10 flex-1 text-left text-sm tracking-wide">
-                                        {item.label}
-                                    </span>
-                                    {isActive && <ChevronRight className="relative z-10 h-4 w-4 opacity-50" />}
-                                </button>
-                            );
-                        })}
-                    </nav>
+                    {renderNav(false)}
                 </div>
             </aside>
 
@@ -169,21 +259,23 @@ export default function CompetitiveDashboard() {
                         transition={{ duration: 0.28 }}
                         className="min-h-full w-full max-w-none"
                     >
-                        {activeSection === 'exams' && (
-                            <ExamFlow onExamStateChange={setIsExamActive} isDashboardView flowType="standard" />
-                        )}
-                        {activeSection === 'pyqs' && (
-                            <ExamFlow onExamStateChange={setIsExamActive} isDashboardView flowType="pyq" />
-                        )}
-                        {activeSection === 'mock' && (
-                            <ExamFlow onExamStateChange={setIsExamActive} isDashboardView flowType="mock" />
-                        )}
-                        {activeSection === 'weekly' && (
-                            <WeeklyTestsFlow onExamStateChange={setIsExamActive} />
-                        )}
-                        {activeSection === 'quizzes' && <TopicQuizzesFlow />}
-                        {activeSection === 'questionary' && <QuestionaryExplanationFlow />}
-                        {activeSection === 'performance' && <PerformanceAnalytics />}
+                        <Suspense fallback={<SectionFallback />}>
+                            {activeSection === 'exams' && (
+                                <ExamFlow onExamStateChange={setIsExamActive} isDashboardView flowType="standard" />
+                            )}
+                            {activeSection === 'pyqs' && (
+                                <ExamFlow onExamStateChange={setIsExamActive} isDashboardView flowType="pyq" />
+                            )}
+                            {activeSection === 'mock' && (
+                                <ExamFlow onExamStateChange={setIsExamActive} isDashboardView flowType="mock" />
+                            )}
+                            {activeSection === 'weekly' && (
+                                <WeeklyTestsFlow onExamStateChange={setIsExamActive} />
+                            )}
+                            {activeSection === 'quizzes' && <TopicQuizzesFlow />}
+                            {activeSection === 'questionary' && <QuestionaryExplanationFlow />}
+                            {activeSection === 'performance' && <PerformanceAnalytics />}
+                        </Suspense>
                     </motion.div>
                 </AnimatePresence>
             </div>

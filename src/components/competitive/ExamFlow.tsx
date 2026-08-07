@@ -155,6 +155,31 @@ export default function ExamFlow({
     timerRef.current = timer;
     elapsedRef.current = elapsedSeconds;
 
+    const flowTypeRef = useRef(flowType);
+    const selectedExamRef = useRef(selectedExam);
+    const selectedSubjectRef = useRef(selectedSubject);
+    const selectedPaperRef = useRef(selectedPaper);
+    const questionsRef = useRef(questions);
+    const currentQuestionIndexRef = useRef(currentQuestionIndex);
+    const userAnswersRef = useRef(userAnswers);
+    const visitedQuestionsRef = useRef(visitedQuestions);
+    const markedForReviewRef = useRef(markedForReview);
+    const bookmarkedRef = useRef(bookmarked);
+    const eliminatedRef = useRef(eliminated);
+    const notesRef = useRef(notes);
+    flowTypeRef.current = flowType;
+    selectedExamRef.current = selectedExam;
+    selectedSubjectRef.current = selectedSubject;
+    selectedPaperRef.current = selectedPaper;
+    questionsRef.current = questions;
+    currentQuestionIndexRef.current = currentQuestionIndex;
+    userAnswersRef.current = userAnswers;
+    visitedQuestionsRef.current = visitedQuestions;
+    markedForReviewRef.current = markedForReview;
+    bookmarkedRef.current = bookmarked;
+    eliminatedRef.current = eliminated;
+    notesRef.current = notes;
+
     // Hook to inform parent (CompetitiveDashboard) when we enter/exit exam mode
     useEffect(() => {
         onExamStateChange?.(step === 'solving' || step === 'result');
@@ -213,26 +238,68 @@ export default function ExamFlow({
         return () => clearInterval(interval);
     }, [step, goToStep]);
 
-    // Autosave draft while solving. Answer/bookmark changes save quickly;
-    // timer progress is included via refs and flushed on a 5s cadence.
+    // Autosave draft while solving. Debounced on answer changes; 5s interval stays stable via refs.
+    useEffect(() => {
+        if (step !== 'solving' || !selectedExam || !selectedSubject || !questions.length) return;
+
+        const persist = () => {
+            const exam = selectedExamRef.current;
+            const subject = selectedSubjectRef.current;
+            const qs = questionsRef.current;
+            if (!exam || !subject || !qs.length) return;
+            saveExamDraft({
+                version: 2,
+                flowType: flowTypeRef.current,
+                examId: exam.id,
+                subjectId: subject.id,
+                paperYear: selectedPaperRef.current ? String(selectedPaperRef.current.year) : undefined,
+                step: 'solving',
+                questions: qs,
+                currentQuestionIndex: currentQuestionIndexRef.current,
+                userAnswers: userAnswersRef.current,
+                visitedQuestions: visitedQuestionsRef.current,
+                markedForReview: markedForReviewRef.current,
+                bookmarked: bookmarkedRef.current,
+                eliminated: eliminatedRef.current,
+                notes: notesRef.current,
+                timer: timerRef.current,
+                elapsedSeconds: elapsedRef.current,
+                savedAt: Date.now(),
+            });
+        };
+
+        const debounceHandle = window.setTimeout(persist, 400);
+        // Interval must NOT restart on every answer — only when solving starts.
+        const intervalHandle = window.setInterval(persist, 5000);
+        return () => {
+            window.clearTimeout(debounceHandle);
+            window.clearInterval(intervalHandle);
+        };
+    }, [step, selectedExam?.id, selectedSubject?.id, questions.length]);
+
+    // Trigger a quick draft write when answers/bookmarks change without resetting the 5s timer.
     useEffect(() => {
         if (step !== 'solving' || !selectedExam || !selectedSubject || !questions.length) return;
         const handle = window.setTimeout(() => {
+            const exam = selectedExamRef.current;
+            const subject = selectedSubjectRef.current;
+            const qs = questionsRef.current;
+            if (!exam || !subject || !qs.length) return;
             saveExamDraft({
                 version: 2,
-                flowType,
-                examId: selectedExam.id,
-                subjectId: selectedSubject.id,
-                paperYear: selectedPaper ? String(selectedPaper.year) : undefined,
+                flowType: flowTypeRef.current,
+                examId: exam.id,
+                subjectId: subject.id,
+                paperYear: selectedPaperRef.current ? String(selectedPaperRef.current.year) : undefined,
                 step: 'solving',
-                questions,
-                currentQuestionIndex,
-                userAnswers,
-                visitedQuestions,
-                markedForReview,
-                bookmarked,
-                eliminated,
-                notes,
+                questions: qs,
+                currentQuestionIndex: currentQuestionIndexRef.current,
+                userAnswers: userAnswersRef.current,
+                visitedQuestions: visitedQuestionsRef.current,
+                markedForReview: markedForReviewRef.current,
+                bookmarked: bookmarkedRef.current,
+                eliminated: eliminatedRef.current,
+                notes: notesRef.current,
                 timer: timerRef.current,
                 elapsedSeconds: elapsedRef.current,
                 savedAt: Date.now(),
@@ -241,11 +308,9 @@ export default function ExamFlow({
         return () => window.clearTimeout(handle);
     }, [
         step,
-        flowType,
-        selectedExam,
-        selectedSubject,
-        selectedPaper,
-        questions,
+        selectedExam?.id,
+        selectedSubject?.id,
+        questions.length,
         currentQuestionIndex,
         userAnswers,
         visitedQuestions,
@@ -253,46 +318,7 @@ export default function ExamFlow({
         bookmarked,
         eliminated,
         notes,
-    ]);
-
-    useEffect(() => {
-        if (step !== 'solving' || !selectedExam || !selectedSubject || !questions.length) return;
-        const handle = window.setInterval(() => {
-            saveExamDraft({
-                version: 2,
-                flowType,
-                examId: selectedExam.id,
-                subjectId: selectedSubject.id,
-                paperYear: selectedPaper ? String(selectedPaper.year) : undefined,
-                step: 'solving',
-                questions,
-                currentQuestionIndex,
-                userAnswers,
-                visitedQuestions,
-                markedForReview,
-                bookmarked,
-                eliminated,
-                notes,
-                timer: timerRef.current,
-                elapsedSeconds: elapsedRef.current,
-                savedAt: Date.now(),
-            });
-        }, 5000);
-        return () => window.clearInterval(handle);
-    }, [
-        step,
-        flowType,
-        selectedExam,
-        selectedSubject,
         selectedPaper,
-        questions,
-        currentQuestionIndex,
-        userAnswers,
-        visitedQuestions,
-        markedForReview,
-        bookmarked,
-        eliminated,
-        notes,
     ]);
 
     // Persist attempt once when results open

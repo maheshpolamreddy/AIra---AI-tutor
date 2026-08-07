@@ -28,6 +28,11 @@ declare module '*.svg' {
     export default content;
 }
 
+declare module '*.svg?url' {
+    const src: string;
+    export default src;
+}
+
 declare module '*.png' {
     const content: string;
     export default content;

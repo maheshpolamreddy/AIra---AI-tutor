@@ -963,47 +963,7 @@ body.visual-freeze-active *::after {
   50% { opacity: 0; }
 }
 
-/* ── Mode selection page (Design Your Path) ── */
-.mode-selection {
-  --color-brand: #2F6BFF;
-  --color-brand-soft: #3B82F6;
-  --color-curriculum: #059669;
-  --color-competitive: #D97706;
-  --color-accent-curriculum: var(--color-curriculum);
-  --color-accent-competitive: var(--color-competitive);
-  --color-surface: #f7f7f5;
-  --color-surface-elevated: #ffffff;
-  --color-border-subtle: rgba(15, 23, 42, 0.08);
-  --color-text-primary: #0f172a;
-  /* slate-600 on warm off-white ≈ WCAG AA */
-  --color-text-muted: #475569;
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
-}
-
-.dark .mode-selection {
-  --color-brand: #60A5FA;
-  --color-brand-soft: #3B82F6;
-  --color-curriculum: #34d399;
-  --color-competitive: #fbbf24;
-  --color-accent-curriculum: var(--color-curriculum);
-  --color-accent-competitive: var(--color-competitive);
-  --color-surface: #0b1220;
-  --color-surface-elevated: #111827;
-  --color-border-subtle: rgba(148, 163, 184, 0.14);
-  --color-text-primary: #f8fafc;
-  --color-text-muted: #94a3b8;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mode-selection .motion-safe\:animate-ping,
-  .mode-selection .motion-safe\:animate-aurora-drift,
-  .mode-selection .motion-safe\:animate-aurora-drift-alt,
-  .mode-selection .animate-gradient-shimmer,
-  .mode-selection .animate-mode-select-pulse {
-    animation: none !important;
-  }
-}
+/* Mode selection tokens live in pages/mode-selection.css */
 
 /* ── Competitive Mode enterprise shell ── */
 .competitive-mode {

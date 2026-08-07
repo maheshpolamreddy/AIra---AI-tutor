@@ -504,7 +504,8 @@ function LoginRedirect() {
 }
 
 function App() {
-  const { toasts, removeToast } = useToastStore();
+  const toasts = useToastStore((s) => s.toasts);
+  const removeToast = useToastStore((s) => s.removeToast);
   const reduceAnimations = useSettingsStore((state) => state.settings.accessibility.reduceAnimations);
 
   useEffect(() => {

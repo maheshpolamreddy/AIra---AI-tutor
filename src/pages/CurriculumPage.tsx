@@ -75,12 +75,21 @@ export default function CurriculumPage() {
 
     // Determine current view based on URL search parameters (Single Source of Truth)
     const getCurrentView = (): ViewState => {
-        if (subjectId) return 'chapters';
-        if (gradeId) return 'subjects';
+        if (subjectId && activeGrade) return 'chapters';
+        if (gradeId && activeGrade) return 'subjects';
         return 'grades';
     };
 
     const currentView = getCurrentView();
+
+    // Recover from stale/unknown ?grade= without leaving a blank subject grid.
+    useEffect(() => {
+        if (gradeId && !activeGrade) {
+            setSearchParams({}, { replace: true });
+        } else if (subjectId && activeGrade && !activeSubject) {
+            setSearchParams({ grade: activeGrade.id }, { replace: true });
+        }
+    }, [gradeId, subjectId, activeGrade, activeSubject, setSearchParams]);
 
     const handleBack = () => {
         if (currentView === 'chapters') {

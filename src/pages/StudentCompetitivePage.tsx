@@ -37,12 +37,12 @@ export default function StudentCompetitivePage() {
         </div>
 
         <div className="relative z-10 flex h-full flex-col overflow-hidden">
-          <header className="sticky top-0 z-50 border-b border-[var(--comp-border)] bg-[var(--comp-elevated)]/75 backdrop-blur-xl">
+          <header className="sticky top-0 z-50 border-b border-[var(--comp-border)] bg-[var(--comp-elevated)] max-lg:shadow-sm lg:bg-[var(--comp-elevated)]/90 lg:backdrop-blur-xl">
             <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
               <button
                 type="button"
                 onClick={() => navigate(studentRoutes.modeSelection)}
-                className="group flex items-center gap-2 rounded-2xl border border-[var(--comp-border)] bg-white/70 px-3 py-2 shadow-sm transition active:scale-95 dark:bg-slate-900/60"
+                className="group flex items-center gap-2 rounded-2xl border border-[var(--comp-border)] bg-white px-3 py-2 shadow-sm transition active:scale-95 dark:bg-slate-900"
               >
                 <ArrowLeft className="h-4 w-4 text-slate-600 transition group-hover:-translate-x-0.5 dark:text-slate-300" />
                 <span className="hidden text-sm font-bold text-slate-600 sm:inline dark:text-slate-300">

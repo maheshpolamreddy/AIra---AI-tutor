@@ -135,7 +135,8 @@ function GradeCard({
 }
 
 export default function GradeSelector({ onGradeSelect }: GradeSelectorProps) {
-  const { setSelectedGrade, getGradeProgress } = useCurriculumStore();
+  const setSelectedGrade = useCurriculumStore((s) => s.setSelectedGrade);
+  const getGradeProgress = useCurriculumStore((s) => s.getGradeProgress);
 
   const gradesByLevel = useMemo(() => {
     return schoolGrades.reduce(
